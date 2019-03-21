@@ -15,12 +15,25 @@ public:
   std::vector<uint8_t> codes;
 };
 
+enum class NodeValue :int64_t {
+  NonExisting = -1,
+  NonExistingSubtree = -2,
+};
+
 class HuffmanDecoder {
 public:
   struct Node {
-    Node(int64_t value) :value(value) { }
-    int64_t value;
+    Node(NodeValue value) :value(value) { }
+    NodeValue value;
+    NodeValue subtree_l1[2];
+    NodeValue subtree_l2[4];
+    std::vector<std::vector<NodeValue>> subtrees;
   };
+//  explicit HuffmanDecoder(
+//      std::string is,
+//      std::map<int64_t, HuffmanTable> dc_dhts,
+//      std::map<int64_t, HuffmanTable> ac_dhts
+//  );
 
   explicit HuffmanDecoder(
       std::istream &is,
@@ -29,12 +42,16 @@ public:
   );
 
   std::vector<int> HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read);
+  std::vector<int> HuffmanDecodeDFA(int64_t dc_index, int64_t ac_index, int64_t count_to_read);
   uint8_t read_tree(std::vector<Node> &tree);
-
+  uint8_t read_tree_batched(std::vector<Node> &tree);
+  int64_t get_offset() { return bit_reader.get_offset(); }
 private:
   static void convert_table_to_tree(
       std::map<int64_t, HuffmanTable> dht,
       std::vector<std::vector<Node>> &trees);
+
+  static void build_subtree(std::vector<std::vector<Node>> &trees);
 
   std::vector<std::vector<Node>> dc_trees;
   std::vector<std::vector<Node>> ac_trees;
