@@ -23,12 +23,13 @@ enum class NodeValue :int64_t {
 class HuffmanDecoder {
 public:
   struct Node {
-    Node(NodeValue value) :value(value) { }
+    Node(NodeValue value, int64_t index) :value(value), index(index) { }
     NodeValue value;
-    NodeValue subtree_l1[2];
-    NodeValue subtree_l2[4];
-    int64_t left{-1};
-    int64_t right{-1};
+    int64_t subtree_l1[2]{-1, -1};
+    int64_t subtree_l2[4];
+//    int64_t left{-1};
+//    int64_t right{-1};
+    int64_t index;
   };
 
   explicit HuffmanDecoder(
@@ -45,12 +46,12 @@ public:
 private:
 
   static Node &left_node(std::vector<Node>& tree, const Node &node) {
-    CHECK(node.left >= 0);
-    return tree[node.left];
+//    CHECK(node.left >= 0);
+    return tree[node.subtree_l1[0]];
   }
   static Node &right_node(std::vector<Node>& tree, const Node &node) {
-    CHECK(node.right >= 0);
-    return tree[node.right];
+//    CHECK(node.right >= 0);
+    return tree[node.subtree_l1[1]];
   }
 
   static void convert_table_to_tree(

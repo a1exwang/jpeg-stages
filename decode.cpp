@@ -45,7 +45,7 @@ constexpr uint8_t JpegAPP0Mark = 0xe0;
 constexpr uint8_t JpegCommentMark = 0xfe;
 
 template <class InputIterator, class OutputIterator>
-void fill_matrix_in_zigzag(InputIterator input, OutputIterator output, int nRows, int nCols) {
+static void fill_matrix_in_zigzag(InputIterator input, OutputIterator output, int nRows, int nCols) {
   int i = 0;
   int j = 0;
   int di = -1;
