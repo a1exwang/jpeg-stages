@@ -7,9 +7,9 @@ class BitReader {
 public:
   explicit BitReader(std::string str) :data(std::move(str)) { }
   int read_bit();
-  int read_nbits(int n, int &output) { return read_nbits_fast(n, output); }
+  int read_nbits(int n, int &output) { return read_nbits_safe(n, output); }
   int read_nbits_fast(int n, int &output);
-  int read_nbits_safe(int n);
+  int read_nbits_safe(int n, int &output);
   void return_bit() {
     if (stream_remaining_bits < 7) {
       stream_remaining_bits++;

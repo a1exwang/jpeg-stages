@@ -46,10 +46,10 @@ int BitReader::read_nbits_fast(int n, int &output) {
   return n;
 }
 
-int BitReader::read_nbits_safe(int n) {
-  int ret = 0;
+int BitReader::read_nbits_safe(int n, int &output) {
+  output = 0;
   for (int i = 0; i < n; i++) {
-    ret |= (read_bit() << (n-i-1));
+    output |= (read_bit() << (n-i-1));
   }
-  return ret;
+  return n;
 }

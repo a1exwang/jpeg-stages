@@ -60,7 +60,7 @@ HuffmanDecoder::HuffmanDecoder(
     std::string str,
     std::map<int64_t, HuffmanTable> dc_dhts,
     std::map<int64_t, HuffmanTable> ac_dhts
-) :bit_reader(move(str)), dc_trees(dc_dhts.size(), std::vector<Node>(1<<17, {NodeValue::NonExisting})), ac_trees(ac_dhts.size(), std::vector<Node>(1<<17, {NodeValue::NonExisting})) {
+) :bit_reader(move(str)), dc_trees(dc_dhts.size()), ac_trees(ac_dhts.size()) {
 
   convert_table_to_tree(dc_dhts, dc_trees);
   convert_table_to_tree(ac_dhts, ac_trees);
@@ -69,7 +69,7 @@ HuffmanDecoder::HuffmanDecoder(
 }
 
 uint8_t HuffmanDecoder::read_tree(std::vector<Node> &tree) {
-  size_t current = 0;
+  int64_t current = 0;
   while (true) {
     int bit = bit_reader.read_bit();
     if (bit < 0) {
@@ -77,20 +77,28 @@ uint8_t HuffmanDecoder::read_tree(std::vector<Node> &tree) {
       abort();
     }
     // 0 for left, 1 for right
+//    if (bit == 0) {
+//      // left child = 2*k + 1
+//      current = (current<<1)+1;
+//    } else {
+//      // right child = 2*k + 2
+//      current = (current<<1)+2;
+//    }
+//    if (current >= tree.size()) {
+//      cout << "Invalid entropy stream, code too long" << endl;
+//      abort();
+//    }
+    NodeValue value;
     if (bit == 0) {
-      // left child = 2*k + 1
-      current = (current<<1)+1;
+      value = left_node(tree, tree[current]).value;
+      current = tree[current].left;
     } else {
-      // right child = 2*k + 2
-      current = (current<<1)+2;
+      value = right_node(tree, tree[current]).value;
+      current = tree[current].right;
     }
-    if (current >= tree.size()) {
-      cout << "Invalid entropy stream, code too long" << endl;
-      abort();
-    }
-    if (tree.at(current).value != NodeValue::NonExisting) {
+    if (value != NodeValue::NonExisting) {
       // yield data
-      return (uint8_t)tree.at(current).value;
+      return (uint8_t)value;
     }
   }
 }
@@ -100,18 +108,52 @@ void HuffmanDecoder::convert_table_to_tree(
     vector<vector<HuffmanDecoder::Node>> &trees
     ) {
 
+
   for (int i = 0; i < dht.size(); i++) {
     auto &ac_values = dht[i].codes;
     auto &ac_counts = dht[i].counts;
     auto &tree = trees[i];
     auto it = ac_values.begin();
-    int skip = 0;
+    size_t skip = 0;
+//    size_t last_mid_node_count = 1;
+    tree.emplace_back(NodeValue::NonExisting);
+    size_t last_mid_node_start = 0;
     for (int depth = 0; depth < ac_counts.size(); depth++) {
       skip = (skip + (depth == 0 ? 0 : ac_counts[depth-1]))* 2;
+//      auto mid_node_count = (1UL << (depth+1UL)) - skip - ac_counts[depth];
       for (int j = 0; j < /*width*/ ac_counts[depth]; j++) {
-        Node node{NodeValue(*it++)};
-        tree[(1 << (depth+1)) - 1 + j + skip] = node;
+        tree.emplace_back(NodeValue(*it++));
+        // <depth+1, skip+j>
+
+        // if last_mid_node left is empty
+        //   put in left
+        // else
+        //   put in right
+        //   last_mid_node_start++;
+        if (tree[last_mid_node_start].left == -1) {
+          tree[last_mid_node_start].left = tree.size()-1;
+        } else {
+          tree[last_mid_node_start].right = tree.size()-1;
+          last_mid_node_start++;
+        }
       }
+      auto mid_node_start = tree.size();
+      for (size_t j = skip + ac_counts[depth]; j < (1UL << (depth+1)); j++) {
+        if (tree[last_mid_node_start].left == -1) {
+          tree[last_mid_node_start].left = tree.size();
+        } else {
+          tree[last_mid_node_start].right = tree.size();
+          last_mid_node_start++;
+        }
+        tree.emplace_back(NodeValue::NonExisting);
+        // if last_mid_node left is empty
+        //   put in left
+        // else
+        //   put in right
+        //   last_mid_node_start++;
+      }
+//      last_mid_node_count = mid_node_count;
+      last_mid_node_start = mid_node_start;
     }
   }
 

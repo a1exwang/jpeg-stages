@@ -74,9 +74,11 @@ int main(int argc, char **argv) {
       }
       cout << endl;
     }
+    double snr = cv::norm(mat-original) / cv::norm(original);
     auto d_cv = chrono::duration<double>(t1 - t0).count();
     auto d_my = chrono::duration<double>(t3 - t2).count();
     cout << "time: OpenCV: " << d_cv << "s, my: " << d_my << "s, mine is " << (d_my > d_cv ? d_my/d_cv : d_cv/d_my) << "x " << (d_my>d_cv ? "slower":"faster") << endl;
+    cout << "SNR: " << 10*log(snr)/log(10) << "dB" << endl;
   } else if (operation == "decode") {
     jst_decode(jpeg_data);
   }

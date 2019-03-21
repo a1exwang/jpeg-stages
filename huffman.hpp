@@ -27,12 +27,9 @@ public:
     NodeValue value;
     NodeValue subtree_l1[2];
     NodeValue subtree_l2[4];
+    int64_t left{-1};
+    int64_t right{-1};
   };
-//  explicit HuffmanDecoder(
-//      std::string is,
-//      std::map<int64_t, HuffmanTable> dc_dhts,
-//      std::map<int64_t, HuffmanTable> ac_dhts
-//  );
 
   explicit HuffmanDecoder(
       std::string str,
@@ -46,6 +43,16 @@ public:
   uint8_t read_tree_batched(std::vector<Node> &tree);
   int64_t get_offset() { return bit_reader.get_offset(); }
 private:
+
+  static Node &left_node(std::vector<Node>& tree, const Node &node) {
+    CHECK(node.left >= 0);
+    return tree[node.left];
+  }
+  static Node &right_node(std::vector<Node>& tree, const Node &node) {
+    CHECK(node.right >= 0);
+    return tree[node.right];
+  }
+
   static void convert_table_to_tree(
       std::map<int64_t, HuffmanTable> dht,
       std::vector<std::vector<Node>> &trees);
