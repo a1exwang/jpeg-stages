@@ -27,7 +27,6 @@ public:
     NodeValue value;
     NodeValue subtree_l1[2];
     NodeValue subtree_l2[4];
-    std::vector<std::vector<NodeValue>> subtrees;
   };
 //  explicit HuffmanDecoder(
 //      std::string is,
@@ -36,7 +35,7 @@ public:
 //  );
 
   explicit HuffmanDecoder(
-      std::istream &is,
+      std::string str,
       std::map<int64_t, HuffmanTable> dc_dhts,
       std::map<int64_t, HuffmanTable> ac_dhts
   );

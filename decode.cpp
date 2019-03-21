@@ -438,7 +438,6 @@ public:
   }
   std::vector<std::vector<IntTable>> read_entropy() {
     string str1 = jpeg_data.substr(offset);
-    stringstream ss1(jpeg_data.substr(offset));
 
     std::vector<std::vector<IntTable>> tables(sof0.component_count);
 
@@ -448,8 +447,7 @@ public:
     mcu_col_count = ((sof0.cols + c - 1) / c);
     mcu_count = mcu_row_count * mcu_col_count;
 
-//    HuffmanDecoder decoder(str1, dc_dhts, ac_dhts);
-    HuffmanDecoder decoder(ss1, dc_dhts, ac_dhts);
+    HuffmanDecoder decoder(move(str1), dc_dhts, ac_dhts);
 
     int64_t total_saved = 0;
     for (int mcu = 0; mcu < mcu_count; ++mcu) {
@@ -476,8 +474,8 @@ public:
     original_size = jpeg_data.size();
     after_huffman = (3*sof0.cols*sof0.lines - total_saved);
     final_size = (3*sof0.cols*sof0.lines);
-    skip(ss1.tellg());
-//    skip(decoder.get_offset());
+//    skip(ss1.tellg());
+    skip(decoder.get_offset());
     return tables;
   }
   uint8_t read_byte() {

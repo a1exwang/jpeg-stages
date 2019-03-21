@@ -18,8 +18,7 @@ static int extend(int value, int nBits) {
   return value;
 }
 
-std::vector<int>
-HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read) {
+std::vector<int> HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read) {
   vector<int> ret(count_to_read, 0);
   int64_t count_read = 0;
   // Finish building huffman tree
@@ -58,16 +57,15 @@ HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_
 }
 
 HuffmanDecoder::HuffmanDecoder(
-    std::istream &is,
+    std::string str,
     std::map<int64_t, HuffmanTable> dc_dhts,
     std::map<int64_t, HuffmanTable> ac_dhts
-) :bit_reader(is), dc_trees(dc_dhts.size(), std::vector<Node>(1<<17, {NodeValue::NonExisting})), ac_trees(ac_dhts.size(), std::vector<Node>(1<<17, {NodeValue::NonExisting})) {
+) :bit_reader(move(str)), dc_trees(dc_dhts.size(), std::vector<Node>(1<<17, {NodeValue::NonExisting})), ac_trees(ac_dhts.size(), std::vector<Node>(1<<17, {NodeValue::NonExisting})) {
 
   convert_table_to_tree(dc_dhts, dc_trees);
   convert_table_to_tree(ac_dhts, ac_trees);
-//  build_subtree(dc_trees);
-//  build_subtree(ac_trees);
-
+  build_subtree(dc_trees);
+  build_subtree(ac_trees);
 }
 
 uint8_t HuffmanDecoder::read_tree(std::vector<Node> &tree) {
