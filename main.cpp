@@ -30,6 +30,7 @@ int main(int argc, char **argv) {
 
 
   if (operation == "tp") {
+    int test_times = atoi(argv[3]);
     atomic<int64_t> counter{0};
     atomic<bool> exit{false};
     int64_t last_n = 0;
@@ -46,7 +47,7 @@ int main(int argc, char **argv) {
         last_n = n;
       }
     });
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < test_times; i++) {
       jst_decode(jpeg_data);
       counter++;
     }
@@ -73,7 +74,9 @@ int main(int argc, char **argv) {
       }
       cout << endl;
     }
-    cout << "time: OpenCV: " << chrono::duration<double>(t1 - t0).count() << "s, my: " << chrono::duration<double>(t3 - t2).count() << "s" << endl;
+    auto d_cv = chrono::duration<double>(t1 - t0).count();
+    auto d_my = chrono::duration<double>(t3 - t2).count();
+    cout << "time: OpenCV: " << d_cv << "s, my: " << d_my << "s, mine is " << (d_my > d_cv ? d_my/d_cv : d_cv/d_my) << "x " << (d_my>d_cv ? "slower":"faster") << endl;
   } else if (operation == "decode") {
     jst_decode(jpeg_data);
   }

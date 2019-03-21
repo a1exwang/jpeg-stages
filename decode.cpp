@@ -29,6 +29,12 @@ using DoubleTable = std::array<double, kBlockSize>;
 constexpr uint8_t JpegSectionStartByte = 0xff;
 typedef enum {kDc = 0, kAc = 1, kNumCoefficientKinds = 2} CoefficientKind;
 
+template <typename T>
+T clip(T x, T lb, T ub) {
+  return std::min(std::max(x, lb), ub);
+}
+
+
 constexpr uint8_t JpegSOF0Mark = 0xc0;
 constexpr uint8_t JpegDHTMark = 0xc4;
 constexpr uint8_t JpegSOIMark = 0xd8;
@@ -265,31 +271,91 @@ public:
     fftw_execute(plan);
     fftw_destroy_plan(plan);
   }
+  // total size is width*height*batch_size
+  void apply_idct_batch(const double *table, double *output, int64_t width, int64_t height, int64_t batch_size) {
+    auto input = make_unique<double[]>(static_cast<size_t>(width * height * batch_size));
 
-  void DecodeData() {
-    for (int c = 0; c < sof0.component_count; c++) {
-      done.emplace_back(mcu_count);
-      const auto &current_q_table =
-          quantization_tables[sof0.component_parameters[c].quantization_table_id];
-//      for (int i = 0; i < mcu_col_count; i++) {
-//        for (int j = 0; j < mcu_row_count; j++) {
-//          done[c].emplace_back();
-//          for (int ii = 0; ii < kBlockSide; ii++) {
-//            for (int jj = 0; jj < kBlockSide; jj++) {
-//              dense_decoded_data[c][i*mcu_col_count*kBlockSide*kBlockSide+j*kBlockSide*kBlockSide+ii*kBlockSide+jj] *=
-//                  current_q_table.q[ii*kBlockSide + jj];
-//            }
-//          }
-//        }
-//      }
-//      applyIDCT()
-      for (int x = 0; x < mcu_count; x++) {
-        for (int i = 0; i < kBlockSize; i++) {
-          decoded_data[c][x][i] *= current_q_table.q[i];
+    // prepare
+    int64_t block_size = width * height;
+    for (int64_t b = 0; b < batch_size; b++) {
+      int k = 0;
+      int64_t batch_offset = b*block_size;
+      constexpr double fac = 0.5 / kBlockSide;
+      double fac0 = std::sqrt(2);
+      for (int i = 0; i < width; ++i) {
+        for (int j = 0; j < height; ++j) {
+          input[batch_offset + k] = table[batch_offset + k] * fac;
+          if (i == 0) {
+            input[batch_offset + k] *= fac0;
+          }
+          if (j == 0) {
+            input[batch_offset + k] *= fac0;
+          }
+          ++k;
         }
-        applyIDCT(decoded_data[c][x], done[c][x]);
       }
     }
+//    for (int64_t b = 0; b < batch_size; b++) {
+//      int64_t batch_offset = b*block_size;
+//      fftw_plan plan = fftw_plan_r2r_2d(kBlockSide, kBlockSide, input.get() + batch_offset, output + batch_offset,
+//                                        FFTW_REDFT01, FFTW_REDFT01, 0);
+//
+//      fftw_execute(plan);
+//      fftw_destroy_plan(plan);
+//    }
+    int n[] = {kBlockSide, kBlockSide};
+    fftw_r2r_kind kinds[] = {FFTW_REDFT01, FFTW_REDFT01};
+    fftw_plan plan = fftw_plan_many_r2r(2, n, batch_size, input.get(), n, 1, block_size, output, n, 1, block_size, kinds, 0);
+    fftw_execute(plan);
+    fftw_destroy_plan(plan);
+  }
+
+  void DecodeDataBatch() {
+    for (int c = 0; c < sof0.component_count; c++) {
+      done.emplace_back(mcu_count);
+
+      auto my_decoded_data = make_unique<double[]>(static_cast<size_t>(kBlockSide * kBlockSide * mcu_count));
+      const auto &current_q_table =
+          quantization_tables[sof0.component_parameters[c].quantization_table_id];
+      for (int x = 0; x < mcu_count; x++) {
+        for (int i = 0; i < kBlockSize; i++) {
+          my_decoded_data[x*kBlockSize + i] = decoded_data[c][x][i] * current_q_table.q[i];
+        }
+      }
+      done_batched.emplace_back(kBlockSize*mcu_count, 0);
+      apply_idct_batch(my_decoded_data.get(), done_batched[c].data(), kBlockSide, kBlockSide, mcu_count);
+    }
+  }
+
+  cv::Mat ConvertColorSpaceBatched() {
+    cv::Mat mat(sof0.lines, sof0.cols, CV_8UC3);
+    for (int i = 0; i < mcu_row_count; i++) {
+      for (int j = 0; j < mcu_col_count; j++) {
+        for (int x = 0; x < kBlockSide; x++) {
+          for (int y = 0; y < kBlockSide; y++) {
+            auto row = i * kBlockSide + x;
+            auto col = j * kBlockSide + y;
+
+            double yy = done_batched[0][(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
+            double cb = done_batched[1][(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
+            double cr = done_batched[2][(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
+
+
+            double r = yy + 1.402f * cr + 128.0f;
+            double g = yy - 0.34414f * cb - 0.71414f * cr + 128.0f;
+            double b = yy + 1.772f * cb + 128.0f;
+
+            b = std::floor(clip(b, 0.0, 255.0));
+            g = std::floor(clip(g, 0.0, 255.0));
+            r = std::floor(clip(r, 0.0, 255.0));
+            if (row < sof0.lines && col < sof0.cols) {
+              mat.at<cv::Vec3b>(row, col) = cv::Vec3b{(uint8_t)b, (uint8_t)g, (uint8_t)r};
+            }
+          }
+        }
+      }
+    }
+    return mat;
   }
 public:
   QuantizationTable parse_q() {
@@ -449,6 +515,8 @@ public:
   vector<vector<double>> dense_decoded_data;
   vector<vector<IntTable>> decoded_data;
   vector<vector<DoubleTable>> done;
+  // c * (mcu_count*kBlockSize)
+  vector<vector<double>> done_batched;
 
   int mcu_count, mcu_row_count, mcu_col_count;
   int64_t original_size;
@@ -456,16 +524,11 @@ public:
   int64_t final_size;
 };
 
-template <typename T>
-T clip(T x, T lb, T ub) {
-  return std::min(std::max(x, lb), ub);
-}
-
 cv::Mat jst_decode(const std::string &jpeg_data, bool verbose) {
   JpegFileData jpeg(jpeg_data);
 
   jpeg.ParseSections();
-  jpeg.DecodeData();
+  jpeg.DecodeDataBatch();
 
   if (verbose) {
     LOG(WARNING)
@@ -474,34 +537,6 @@ cv::Mat jst_decode(const std::string &jpeg_data, bool verbose) {
         << " (" << 100.0*jpeg.after_huffman/jpeg.original_size << "% of original, " << 100.0*jpeg.after_huffman/jpeg.final_size <<  "% of final), "
         << "Matrix size: " << jpeg.final_size/1e3 << "KB, (" << 100.0*jpeg.final_size/jpeg.original_size << "%)";
   }
-
-  cv::Mat mat(jpeg.sof0.lines, jpeg.sof0.cols, CV_8UC3);
-  for (int i = 0; i < jpeg.mcu_row_count; i++) {
-    for (int j = 0; j < jpeg.mcu_col_count; j++) {
-      for (int x = 0; x < kBlockSide; x++) {
-        for (int y = 0; y < kBlockSide; y++) {
-          auto row = i * kBlockSide + x;
-          auto col = j * kBlockSide + y;
-
-          double yy = jpeg.done[0][i * jpeg.mcu_col_count + j][x * kBlockSide + y];
-          double cb = jpeg.done[1][i * jpeg.mcu_col_count + j][x * kBlockSide + y];
-          double cr = jpeg.done[2][i * jpeg.mcu_col_count + j][x * kBlockSide + y];
-
-
-          double r = yy + 1.402f * cr + 128.0f;
-          double g = yy - 0.34414f * cb - 0.71414f * cr + 128.0f;
-          double b = yy + 1.772f * cb + 128.0f;
-
-          b = std::floor(clip(b, 0.0, 255.0));
-          g = std::floor(clip(g, 0.0, 255.0));
-          r = std::floor(clip(r, 0.0, 255.0));
-          if (row < jpeg.sof0.lines && col < jpeg.sof0.cols) {
-            mat.at<cv::Vec3b>(row, col) = cv::Vec3b{(uint8_t)b, (uint8_t)g, (uint8_t)r};
-          }
-        }
-      }
-    }
-  }
-  return mat;
+  return jpeg.ConvertColorSpaceBatched();
 }
 
