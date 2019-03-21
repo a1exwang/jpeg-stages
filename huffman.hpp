@@ -1,8 +1,10 @@
 #pragma once
+#include "bit_reader.hpp"
 #include <vector>
 #include <map>
 #include <cstdint>
 #include <iostream>
+#include <glog/logging.h>
 
 class HuffmanTable {
 public:
@@ -15,6 +17,11 @@ public:
 
 class HuffmanDecoder {
 public:
+  struct Node {
+    Node(int64_t value) :value(value) { }
+    int64_t value;
+  };
+
   explicit HuffmanDecoder(
       std::istream &is,
       std::map<int64_t, HuffmanTable> dc_dhts,
@@ -22,12 +29,16 @@ public:
   );
 
   std::vector<int> HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read);
-  int read_bit();
+  uint8_t read_tree(std::vector<Node> &tree);
 
 private:
-  int octet = 0;
-  int remaining_bits = 0;
-  std::istream &is;
-  std::vector<std::vector<int64_t>> dc_trees, ac_trees;
+  static void convert_table_to_tree(
+      std::map<int64_t, HuffmanTable> dht,
+      std::vector<std::vector<Node>> &trees);
+
+  std::vector<std::vector<Node>> dc_trees;
+  std::vector<std::vector<Node>> ac_trees;
+
+  BitReader bit_reader;
 };
 
