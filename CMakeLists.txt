@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.13)
 project(jpeg-stages)
 
 set(CMAKE_CXX_STANDARD 17)
+add_compile_options(-mavx2)
+#add_compile_options(-mavx2 -O3)
 # Currently Arch Linux OpenCV 4.0 CMake is not working, so we manually add a include path
 include_directories(/usr/include/opencv4)
 include_directories(${CMAKE_SOURCE_DIR})
@@ -17,3 +19,7 @@ target_link_libraries(tests glog fftw3 opencv_highgui opencv_imgcodecs opencv_co
 
 add_executable(fftw_multi fftw_multi.cpp)
 target_link_libraries(fftw_multi fftw3 pthread)
+include_directories(${CMAKE_SOURCE_DIR})
+
+add_executable(avx2 avx.c)
+target_compile_options(avx2 PUBLIC -mavx2)

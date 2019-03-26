@@ -36,7 +36,7 @@ public:
       std::string str,
       std::map<int64_t, HuffmanTable> dc_dhts,
       std::map<int64_t, HuffmanTable> ac_dhts,
-      int64_t bit_batch_size = 3
+      int64_t bit_batch_size = 4
   );
 
   std::vector<int> HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read);

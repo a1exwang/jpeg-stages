@@ -19,6 +19,8 @@
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <immintrin.h>
+#include <cstdlib>
 
 using namespace std;
 
@@ -340,10 +342,14 @@ public:
           my_decoded_data[x*kBlockSize + i] = decoded_data[c][x][i] * current_q_table.q[i];
         }
       }
-      done_batched.emplace_back(kBlockSize*mcu_count, 0);
-      apply_idct_batch(my_decoded_data.get(), done_batched[c].data(), kBlockSide, kBlockSide, mcu_count);
+      done_batched.push_back(
+          std::unique_ptr<float, decltype(&free)>((float*)aligned_alloc(256, kBlockSize * mcu_count*sizeof(float)), &free)
+      );
+      apply_idct_batch(my_decoded_data.get(), done_batched[c].get(), kBlockSide, kBlockSide, mcu_count);
     }
   }
+
+  cv::Mat ConvertColorSpaceAVX();
 
   cv::Mat ConvertColorSpaceBatched() {
     cv::Mat mat(sof0.lines, sof0.cols, CV_8UC3);
@@ -354,18 +360,18 @@ public:
             auto row = i * kBlockSide + x;
             auto col = j * kBlockSide + y;
             if (row < sof0.lines && col < sof0.cols) {
-              float yy = done_batched.at(0).at((i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y);
-              float cb = done_batched.at(1).at((i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y);
-              float cr = done_batched.at(2).at((i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y);
+              float yy = done_batched.at(0).get()[(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
+              float cb = done_batched.at(1).get()[(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
+              float cr = done_batched.at(2).get()[(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
 
               float r = yy + 1.402f * cr + 128.0f;
               float g = yy - 0.34414f * cb - 0.71414f * cr + 128.0f;
               float b = yy + 1.772f * cb + 128.0f;
 
-              r = std::floor(clip(r, 0.0f, 255.0f));
-              g = std::floor(clip(g, 0.0f, 255.0f));
-              b = std::floor(clip(b, 0.0f, 255.0f));
-              mat.at<cv::Vec3b>(row, col) = cv::Vec3b{(uint8_t)b, (uint8_t)g, (uint8_t)r};
+              r = clip(r, 0.0f, 255.0f);
+              g = clip(g, 0.0f, 255.0f);
+              b = clip(b, 0.0f, 255.0f);
+              mat.at<cv::Vec3b>(row, col) = {(uint8_t)b, (uint8_t)g, (uint8_t)r};
             }
           }
         }
@@ -478,8 +484,8 @@ public:
           IntTable table;
 
           auto data = decoder.HuffmanDecode(dc_ids[c], ac_ids[c], kBlockSize);
-//          fill_matrix_in_zigzag(data.begin(), table.begin(), kBlockSide, kBlockSide);
-          fill_matrix_in_zigzag_fast64(data.begin(), table.begin());
+          fill_matrix_in_zigzag(data.begin(), table.begin(), kBlockSide, kBlockSide);
+//          fill_matrix_in_zigzag_fast64(data.begin(), table.begin());
 
           if (!component_tables.empty()) {
             // differential encoded for DC values
@@ -535,13 +541,88 @@ public:
   vector<vector<IntTable>> decoded_data;
   vector<vector<FloatTable>> done;
   // c * (mcu_count*kBlockSize)
-  vector<vector<float>> done_batched;
+//  vector<vector<float>> done_batched;
+  vector<std::unique_ptr<float, decltype(&free)>> done_batched;
 
   int mcu_count, mcu_row_count, mcu_col_count;
   int64_t original_size;
   int64_t after_huffman;
   int64_t final_size;
 };
+
+
+cv::Mat JpegFileData::ConvertColorSpaceAVX() {
+  cv::Mat mat((int)ceil(double(sof0.lines)/kBlockSide)*kBlockSide, (int)ceil(double(sof0.cols)/kBlockSide)*kBlockSide, CV_8UC3);
+  for (int i = 0; i < mcu_row_count; i++) {
+    for (int j = 0; j < mcu_col_count; j++) {
+      for (int x = 0; x < kBlockSide; x++) {
+        float *yyptr = &done_batched.at(0).get()[(i * mcu_col_count + j) * kBlockSize + x * kBlockSide];
+        float *cbptr = &done_batched.at(1).get()[(i * mcu_col_count + j) * kBlockSize + x * kBlockSide];
+        float *crptr = &done_batched.at(2).get()[(i * mcu_col_count + j) * kBlockSize + x * kBlockSide];
+
+        __m256 yyvec = _mm256_load_ps(yyptr);
+        __m256 rvec = _mm256_set_ps(128.0f, 128.0f, 128.0f, 128.0f, 128.0f, 128.0f, 128.0f, 128.0f);
+
+        {
+          __m256 crcbvec = _mm256_load_ps(crptr);
+          __m256 factorvec = _mm256_set_ps(1.402f,1.402f,1.402f,1.402f,1.402f,1.402f,1.402f,1.402f);
+          crcbvec = _mm256_mul_ps(crcbvec, factorvec);
+          rvec = _mm256_add_ps(rvec, yyvec);
+          rvec = _mm256_add_ps(rvec, crcbvec);
+        }
+
+        __m256 bvec = _mm256_set_ps(128.0f, 128.0f, 128.0f, 128.0f, 128.0f, 128.0f, 128.0f, 128.0f);
+        {
+          __m256 cb1vec = _mm256_load_ps(cbptr);
+          __m256 cb1factorvec = _mm256_set_ps(1.772f,1.772f,1.772f,1.772f,1.772f,1.772f,1.772f,1.772f);
+          cb1vec = _mm256_mul_ps(cb1vec, cb1factorvec);
+          bvec = _mm256_add_ps(bvec, yyvec);
+          bvec = _mm256_add_ps(bvec, cb1vec);
+        }
+
+        __m256 gvec = _mm256_set_ps(128.0f, 128.0f, 128.0f, 128.0f, 128.0f, 128.0f, 128.0f, 128.0f);
+        {
+          __m256 crcbvec = _mm256_load_ps(crptr);
+          __m256 crcbfactorvec = _mm256_set_ps(-0.71414f,-0.71414f,-0.71414f,-0.71414f,-0.71414f,-0.71414f,-0.71414f,-0.71414f);
+          crcbvec = _mm256_mul_ps(crcbvec, crcbfactorvec);
+          gvec = _mm256_add_ps(gvec, crcbvec);
+
+          crcbvec = _mm256_load_ps(cbptr);
+          crcbfactorvec = _mm256_set_ps(-0.34414f,-0.34414f,-0.34414f,-0.34414f,-0.34414f,-0.34414f,-0.34414f,-0.34414f);
+          crcbvec = _mm256_mul_ps(crcbvec, crcbfactorvec);
+          gvec = _mm256_add_ps(gvec, crcbvec);
+
+          gvec = _mm256_add_ps(gvec, yyvec);
+        }
+
+        __m256 zerovec = _mm256_set_ps(0,0,0,0,0,0,0,0);
+        __m256 maxvec = _mm256_set_ps(255,255,255,255,255,255,255,255);
+        rvec = _mm256_max_ps(rvec, zerovec);
+        gvec = _mm256_max_ps(gvec, zerovec);
+        bvec = _mm256_max_ps(bvec, zerovec);
+
+        rvec = _mm256_min_ps(rvec, maxvec);
+        gvec = _mm256_min_ps(gvec, maxvec);
+        bvec = _mm256_min_ps(bvec, maxvec);
+        __m256i rveci = _mm256_cvtps_epi32(rvec);
+        __m256i gveci = _mm256_cvtps_epi32(gvec);
+        __m256i bveci = _mm256_cvtps_epi32(bvec);
+
+        auto row = i * kBlockSide + x;
+        auto col = j * kBlockSide;
+        for (int y = 0; y < kBlockSide; y++, col++) {
+          auto offset = row * mat.cols*3 + col*3;
+          ((uint8_t*)mat.data)[offset] = (uint8_t)((int32_t*)&bveci)[y];
+          ((uint8_t*)mat.data)[offset+1] = (uint8_t)((int32_t*)&gveci)[y];
+          ((uint8_t*)mat.data)[offset+2] = (uint8_t)((int32_t*)&rveci)[y];
+        }
+      }
+    }
+  }
+  cv::Rect myROI(0, 0, sof0.cols, sof0.lines);
+  return mat(myROI);
+
+}
 
 cv::Mat jst_decode(const std::string &jpeg_data, bool verbose) {
   JpegFileData jpeg(jpeg_data);
@@ -556,6 +637,6 @@ cv::Mat jst_decode(const std::string &jpeg_data, bool verbose) {
         << " (" << 100.0*jpeg.after_huffman/jpeg.original_size << "% of original, " << 100.0*jpeg.after_huffman/jpeg.final_size <<  "% of final), "
         << "Matrix size: " << jpeg.final_size/1e3 << "KB, (" << 100.0*jpeg.final_size/jpeg.original_size << "%)";
   }
-  return jpeg.ConvertColorSpaceBatched();
+  return jpeg.ConvertColorSpaceAVX();
 }
 

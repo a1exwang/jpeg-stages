@@ -164,12 +164,12 @@ uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree) {
   while (true) {
     int bits;
     int nread = bit_reader.read_nbits(bit_batch_size, bits);
-    if (bits < 0) {
-      cerr << "Invalid entropy stream, unexpected EOF" << endl;
-      abort();
-    }
+//    if (bits < 0) {
+//      cerr << "Invalid entropy stream, unexpected EOF" << endl;
+//      abort();
+//    }
     // 0 for left, 1 for right
-    CHECK(nread == bit_batch_size);
+//    CHECK(nread == bit_batch_size);
     auto next_node = tree[current].subtrees[bit_batch_size-1].at(bits);
     if (next_node == -1) {
       // fallback

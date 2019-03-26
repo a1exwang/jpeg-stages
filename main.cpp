@@ -58,19 +58,28 @@ int main(int argc, char **argv) {
     cv::imshow("test", mat);
     cv::waitKey(0);
   } else if (operation == "compare") {
+    int times = atoi(argv[3]);
     auto t0 = std::chrono::high_resolution_clock::now();
-    auto original = cv::imread(file_path);
+    cv::Mat original;
+    for (int i = 0; i < times; i++) {
+      original = cv::imread(file_path);
+    }
     auto t1 = std::chrono::high_resolution_clock::now();
     int crop_w = 10, crop_h = 10;
     auto t2 = std::chrono::high_resolution_clock::now();
-    cv::Mat mat = jst_decode(jpeg_data);
+    cv::Mat mat;
+    for (int i = 0; i < times; i++) {
+      mat = jst_decode(jpeg_data);
+    }
     auto t3 = std::chrono::high_resolution_clock::now();
     cout << "showing diff of first " << crop_w << "x" << crop_h << " values" << endl;
     for (int i = 0; i < crop_w; i++) {
       for (int j = 0; j < crop_h; j++) {
-        auto o = original.at<cv::Vec3b>(i, j)[0];
-        auto my = mat.at<cv::Vec3b>(i, j)[0];
-        cout << (size_t)my << "_" << (size_t)o << " ";
+        for (int k = 0; k < 3; k++) {
+          auto o = original.at<cv::Vec3b>(i, j)[k];
+          auto my = mat.at<cv::Vec3b>(i, j)[k];
+          cout << (size_t)my << "_" << (size_t)o << " ";
+        }
       }
       cout << endl;
     }
