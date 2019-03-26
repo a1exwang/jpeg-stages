@@ -51,6 +51,7 @@ std::vector<int> HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_inde
     // decode_zz k
     int zzk = -1;
     bit_reader.read_nbits(ssss, zzk);
+    CHECK(count_read < count_to_read);
     ret.at(count_read++) = extend(zzk, ssss);
   }
   return std::move(ret);
@@ -59,16 +60,17 @@ std::vector<int> HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_inde
 HuffmanDecoder::HuffmanDecoder(
     std::string str,
     std::map<int64_t, HuffmanTable> dc_dhts,
-    std::map<int64_t, HuffmanTable> ac_dhts
-) :bit_reader(move(str)), dc_trees(dc_dhts.size()), ac_trees(ac_dhts.size()) {
+    std::map<int64_t, HuffmanTable> ac_dhts,
+    int64_t bit_batch_size
+) :bit_reader(move(str)), dc_trees(dc_dhts.size()), ac_trees(ac_dhts.size()), bit_batch_size(bit_batch_size) {
 
   convert_table_to_tree(dc_dhts, dc_trees);
   convert_table_to_tree(ac_dhts, ac_trees);
-  build_subtree(dc_trees);
-  build_subtree(ac_trees);
+  build_subtree(dc_trees, bit_batch_size);
+  build_subtree(ac_trees, bit_batch_size);
 }
 
-uint8_t HuffmanDecoder::read_tree(std::vector<Node> &tree) {
+uint8_t HuffmanDecoder::read_tree_safe(std::vector<Node> &tree) {
   int64_t current = 0;
   while (true) {
     int bit = bit_reader.read_bit();
@@ -77,8 +79,8 @@ uint8_t HuffmanDecoder::read_tree(std::vector<Node> &tree) {
       abort();
     }
     // 0 for left, 1 for right
-    NodeValue value = tree[tree[current].subtree_l1[bit]].value;
-    current = tree[current].subtree_l1[bit];
+    NodeValue value = tree[tree[current].children[bit]].value;
+    current = tree[current].children[bit];
     if (value != NodeValue::NonExisting) {
       // yield data
       return (uint8_t)value;
@@ -111,19 +113,19 @@ void HuffmanDecoder::convert_table_to_tree(
         // else
         //   put in right
         //   last_mid_node_start++;
-        if (tree[last_mid_node_start].subtree_l1[0] == -1) {
-          tree[last_mid_node_start].subtree_l1[0] = tree.size()-1;
+        if (tree[last_mid_node_start].children[0] == -1) {
+          tree[last_mid_node_start].children[0] = tree.size()-1;
         } else {
-          tree[last_mid_node_start].subtree_l1[1] = tree.size()-1;
+          tree[last_mid_node_start].children[1] = tree.size()-1;
           last_mid_node_start++;
         }
       }
       auto mid_node_start = tree.size();
       for (size_t j = skip + ac_counts[depth]; j < (1UL << (depth+1)); j++) {
-        if (tree[last_mid_node_start].subtree_l1[0] == -1) {
-          tree[last_mid_node_start].subtree_l1[0] = tree.size();
+        if (tree[last_mid_node_start].children[0] == -1) {
+          tree[last_mid_node_start].children[0] = tree.size();
         } else {
-          tree[last_mid_node_start].subtree_l1[1] = tree.size();
+          tree[last_mid_node_start].children[1] = tree.size();
           last_mid_node_start++;
         }
         tree.emplace_back(NodeValue::NonExisting, tree.size());
@@ -139,48 +141,84 @@ void HuffmanDecoder::convert_table_to_tree(
 
 }
 
-void HuffmanDecoder::build_subtree(vector<vector<HuffmanDecoder::Node>> &trees) {
+void HuffmanDecoder::build_subtree(vector<vector<HuffmanDecoder::Node>> &trees, int max_depth) {
   for (auto &tree : trees) {
-    for (int i = 0; i < tree.size(); i++) {
-      if (tree[i].subtree_l1[0] != -1) {
-        tree[i].subtree_l2[0b00] = left_node(tree, left_node(tree, tree[i])).index;
-        tree[i].subtree_l2[0b10] = right_node(tree, left_node(tree, tree[i])).index;
-      }
-      if (tree[i].subtree_l1[1] != -1) {
-        tree[i].subtree_l2[0b01] = left_node(tree, right_node(tree, tree[i])).index;
-        tree[i].subtree_l2[0b11] = right_node(tree, right_node(tree, tree[i])).index;
+    for (auto &node : tree) {
+      for (int d = 1; d <= max_depth; d++) {
+        auto &subtree = node.subtrees.emplace_back(1 << d);
+        for (size_t i = 0; i < subtree.size(); i++) {
+          subtree[i] = take_precedence(tree, node, i, d);
+        }
       }
     }
   }
-
 }
 
 uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree) {
   int64_t current = 0;
+  if (!cached_values.empty()) {
+    auto ret = cached_values.front();
+    cached_values.pop();
+    return ret;
+  }
   while (true) {
     int bits;
-    int nread = bit_reader.read_nbits(2, bits);
+    int nread = bit_reader.read_nbits(bit_batch_size, bits);
     if (bits < 0) {
       cerr << "Invalid entropy stream, unexpected EOF" << endl;
       abort();
     }
     // 0 for left, 1 for right
-    NodeValue value;
-//    tree[current].subtree_l1
-    if (bits == 0) {
-      value = left_node(tree, tree[current]).value;
-      current = tree[current].subtree_l1[0];
+    CHECK(nread == bit_batch_size);
+    auto next_node = tree[current].subtrees[bit_batch_size-1].at(bits);
+    if (next_node == -1) {
+      // fallback
+      for (int i = 0; i < nread; i++) {
+        int bit = (bits >> (nread - i - 1)) & 1;
+        // 0 for left, 1 for right
+        auto &node = tree[current];
+        current = node.children[bit];
+        NodeValue value = tree[current].value;
+        if (value != NodeValue::NonExisting) {
+          // return remaining bits
+          bit_reader.return_nbits(nread - i - 1);
+#ifndef NDEBUG
+          printf("readtree: return bits: %d\n", nread-i-1);
+#endif
+          return (uint8_t)value;
+        }
+      }
+      LOG(FATAL) << "Unreachable code";
+
     } else {
-      value = right_node(tree, tree[current]).value;
-      current = tree[current].subtree_l1[1];
-    }
-    if (value != NodeValue::NonExisting) {
-      // yield data
-      return (uint8_t)value;
+      if (int64_t(tree[next_node].value) >= 0) {
+        return uint8_t(tree[next_node].value);
+      } else {
+        current = next_node;
+      }
     }
   }
 }
 
-std::vector<int> HuffmanDecoder::HuffmanDecodeDFA(int64_t dc_index, int64_t ac_index, int64_t count_to_read) {
+int64_t HuffmanDecoder::take_precedence(
+    vector<HuffmanDecoder::Node> &tree,
+    HuffmanDecoder::Node &node,
+    int64_t child_id,
+    int64_t nbits) {
+
+  CHECK(nbits <= 63 && nbits > 0);
+  Node *current_node = &node;
+  for (int64_t i = nbits-1; i >= 0; i--) {
+    int64_t current_bit = (child_id >> i) & 0x1;
+    auto next_index = current_node->children[current_bit];
+//    CHECK(next_index >= 0);
+    if (next_index < 0) {
+      return -1;
+    }
+
+    current_node = &tree[next_index];
+  }
+  return current_node->index;
+
 }
 

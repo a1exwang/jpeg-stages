@@ -16,15 +16,31 @@ int BitReader::read_bit() {
   // Take the MSB(Most significant bit)
   auto ret = (octet & (1 << (stream_remaining_bits-1))) ? 1 : 0;
   stream_remaining_bits--;
+#ifndef NDEBUG
+  printf("offset: %ld, bitoff: %d, readbit: %d\n", next_offset-1, 7-stream_remaining_bits, ret);
+#endif
   return ret;
 }
 
 int BitReader::read_nbits_fast(int n, int &output) {
   output = 0;
   int rest = n;
-  while (rest > stream_remaining_bits) {
+  while (rest >= stream_remaining_bits) {
+    if (stream_remaining_bits == 0) {
+      octet = read_byte();
+      if (octet == 0xFF) {
+        auto b = read_byte();
+        CHECK(b == 0);
+      }
+    }
+
     rest -= stream_remaining_bits;
-    output |= (octet >> (8-stream_remaining_bits)) << rest;
+    auto mask = (1 << stream_remaining_bits) - 1;
+    auto tmp = ((octet >> (8-stream_remaining_bits)) & mask);
+    if (stream_remaining_bits > 0) {
+      printf("read_nbits: %x, offset=%ld, bitoff=%d, n=%d\n", tmp, next_offset-1, 7-stream_remaining_bits, stream_remaining_bits);
+    }
+    output |= (tmp << rest);
     octet = read_byte();
     if (octet == 0xFF) {
       auto b = read_byte();
@@ -41,7 +57,11 @@ int BitReader::read_nbits_fast(int n, int &output) {
   // ASSERT rest <= stream_remaining_bits <= 8
   // Take the MSB(Most significant bit)
   auto mask = (1 << rest) - 1;
-  output |= (octet >> (8 - rest)) & mask;
+  auto tmp = (octet >> (stream_remaining_bits - rest)) & mask;
+  if (rest > 0) {
+    printf("read_nbits: %x, offset=%ld, bitoff=%d, n=%d\n", tmp, next_offset-1, 8-stream_remaining_bits, rest);
+  }
+  output |= tmp;
   stream_remaining_bits -= rest;
   return n;
 }
