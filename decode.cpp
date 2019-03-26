@@ -25,7 +25,7 @@ using namespace std;
 const int kBlockSide = 8;
 const int kBlockSize = kBlockSide * kBlockSide;
 using IntTable = std::array<int, kBlockSize>;
-using DoubleTable = std::array<double, kBlockSize>;
+using FloatTable = std::array<float, kBlockSize>;
 constexpr uint8_t JpegSectionStartByte = 0xff;
 typedef enum {kDc = 0, kAc = 1, kNumCoefficientKinds = 2} CoefficientKind;
 
@@ -43,6 +43,17 @@ constexpr uint8_t JpegSOSMark = 0xda;
 constexpr uint8_t JpegDQTMark = 0xdb;
 constexpr uint8_t JpegAPP0Mark = 0xe0;
 constexpr uint8_t JpegCommentMark = 0xfe;
+
+int zigzag_to_normal_table[] = {
+    0,  1,  8, 16,  9,  2,  3, 10,
+    17, 24, 32, 25, 18, 11,  4,  5,
+    12, 19, 26, 33, 40, 48, 41, 34,
+    27, 20, 13,  6,  7, 14, 21, 28,
+    35, 42, 49, 56, 57, 50, 43, 36,
+    29, 22, 15, 23, 30, 37, 44, 51,
+    58, 59, 52, 45, 38, 31, 39, 46,
+    53, 60, 61, 54, 47, 55, 62, 63
+};
 
 template <class InputIterator, class OutputIterator>
 static void fill_matrix_in_zigzag(InputIterator input, OutputIterator output, int nRows, int nCols) {
@@ -66,6 +77,13 @@ static void fill_matrix_in_zigzag(InputIterator input, OutputIterator output, in
     } else {
       ++i;
     }
+  }
+}
+
+template <class InputIterator, class OutputIterator>
+static void fill_matrix_in_zigzag_fast64(InputIterator input, OutputIterator output) {
+  for (int i = 0; i < 64; i++) {
+    output[zigzag_to_normal_table[i]] = input[i];
   }
 }
 
@@ -246,8 +264,8 @@ public:
 
   }
 
-  void applyIDCT(const IntTable& table, DoubleTable &output) {
-    DoubleTable input;
+  void applyIDCT(const IntTable& table, FloatTable &output) {
+    FloatTable input;
 
     int k = 0;
     constexpr double fac = 0.5 / kBlockSide;
@@ -265,15 +283,15 @@ public:
       }
     }
 
-    fftw_plan plan = fftw_plan_r2r_2d(kBlockSide, kBlockSide, input.data(), output.data(),
+    fftwf_plan plan = fftwf_plan_r2r_2d(kBlockSide, kBlockSide, input.data(), output.data(),
                                       FFTW_REDFT01, FFTW_REDFT01, 0);
 
-    fftw_execute(plan);
-    fftw_destroy_plan(plan);
+    fftwf_execute(plan);
+    fftwf_destroy_plan(plan);
   }
   // total size is width*height*batch_size
-  void apply_idct_batch(const double *table, double *output, int64_t width, int64_t height, int64_t batch_size) {
-    auto input = make_unique<double[]>(static_cast<size_t>(width * height * batch_size));
+  void apply_idct_batch(const float *table, float *output, int64_t width, int64_t height, int64_t batch_size) {
+    auto input = make_unique<float[]>(static_cast<size_t>(width * height * batch_size));
 
     // prepare
     int64_t block_size = width * height;
@@ -281,7 +299,7 @@ public:
       int k = 0;
       int64_t batch_offset = b*block_size;
       constexpr double fac = 0.5 / kBlockSide;
-      double fac0 = std::sqrt(2);
+      float fac0 = std::sqrt(2);
       for (int i = 0; i < width; ++i) {
         for (int j = 0; j < height; ++j) {
           input[batch_offset + k] = table[batch_offset + k] * fac;
@@ -304,17 +322,17 @@ public:
 //      fftw_destroy_plan(plan);
 //    }
     int n[] = {kBlockSide, kBlockSide};
-    fftw_r2r_kind kinds[] = {FFTW_REDFT01, FFTW_REDFT01};
-    fftw_plan plan = fftw_plan_many_r2r(2, n, batch_size, input.get(), n, 1, block_size, output, n, 1, block_size, kinds, 0);
-    fftw_execute(plan);
-    fftw_destroy_plan(plan);
+    fftwf_r2r_kind kinds[] = {FFTW_REDFT01, FFTW_REDFT01};
+    fftwf_plan plan = fftwf_plan_many_r2r(2, n, batch_size, input.get(), n, 1, block_size, output, n, 1, block_size, kinds, 0);
+    fftwf_execute(plan);
+    fftwf_destroy_plan(plan);
   }
 
   void DecodeDataBatch() {
     for (int c = 0; c < sof0.component_count; c++) {
       done.emplace_back(mcu_count);
 
-      auto my_decoded_data = make_unique<double[]>(static_cast<size_t>(kBlockSide * kBlockSide * mcu_count));
+      auto my_decoded_data = make_unique<float[]>(static_cast<size_t>(kBlockSide * kBlockSide * mcu_count));
       const auto &current_q_table =
           quantization_tables[sof0.component_parameters[c].quantization_table_id];
       for (int x = 0; x < mcu_count; x++) {
@@ -335,20 +353,18 @@ public:
           for (int y = 0; y < kBlockSide; y++) {
             auto row = i * kBlockSide + x;
             auto col = j * kBlockSide + y;
-
-            double yy = done_batched[0][(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
-            double cb = done_batched[1][(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
-            double cr = done_batched[2][(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
-
-
-            double r = yy + 1.402f * cr + 128.0f;
-            double g = yy - 0.34414f * cb - 0.71414f * cr + 128.0f;
-            double b = yy + 1.772f * cb + 128.0f;
-
-            b = std::floor(clip(b, 0.0, 255.0));
-            g = std::floor(clip(g, 0.0, 255.0));
-            r = std::floor(clip(r, 0.0, 255.0));
             if (row < sof0.lines && col < sof0.cols) {
+              float yy = done_batched.at(0).at((i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y);
+              float cb = done_batched.at(1).at((i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y);
+              float cr = done_batched.at(2).at((i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y);
+
+              float r = yy + 1.402f * cr + 128.0f;
+              float g = yy - 0.34414f * cb - 0.71414f * cr + 128.0f;
+              float b = yy + 1.772f * cb + 128.0f;
+
+              r = std::floor(clip(r, 0.0f, 255.0f));
+              g = std::floor(clip(g, 0.0f, 255.0f));
+              b = std::floor(clip(b, 0.0f, 255.0f));
               mat.at<cv::Vec3b>(row, col) = cv::Vec3b{(uint8_t)b, (uint8_t)g, (uint8_t)r};
             }
           }
@@ -371,7 +387,8 @@ public:
       auto b = read_byte();
       tmp[i] = b;
     }
-    fill_matrix_in_zigzag(tmp.begin(), ret.q.begin(), kBlockSide, kBlockSide);
+//    fill_matrix_in_zigzag(tmp.begin(), ret.q.begin(), kBlockSide, kBlockSide);
+    fill_matrix_in_zigzag_fast64(tmp.begin(), ret.q.begin());
     return ret;
   }
 
@@ -461,7 +478,8 @@ public:
           IntTable table;
 
           auto data = decoder.HuffmanDecode(dc_ids[c], ac_ids[c], kBlockSize);
-          fill_matrix_in_zigzag(data.begin(), table.begin(), kBlockSide, kBlockSide);
+//          fill_matrix_in_zigzag(data.begin(), table.begin(), kBlockSide, kBlockSide);
+          fill_matrix_in_zigzag_fast64(data.begin(), table.begin());
 
           if (!component_tables.empty()) {
             // differential encoded for DC values
@@ -513,11 +531,11 @@ public:
 
   vector<QuantizationTable> quantization_tables;
 
-  vector<vector<double>> dense_decoded_data;
+  vector<vector<float>> dense_decoded_data;
   vector<vector<IntTable>> decoded_data;
-  vector<vector<DoubleTable>> done;
+  vector<vector<FloatTable>> done;
   // c * (mcu_count*kBlockSize)
-  vector<vector<double>> done_batched;
+  vector<vector<float>> done_batched;
 
   int mcu_count, mcu_row_count, mcu_col_count;
   int64_t original_size;

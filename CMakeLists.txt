@@ -9,7 +9,7 @@ include_directories(${CMAKE_SOURCE_DIR})
 add_library(jpegdecoder decode.cpp huffman.cpp bit_reader.cpp)
 
 add_executable(jpeg_stages main.cpp)
-target_link_libraries(jpeg_stages glog fftw3 opencv_highgui opencv_imgcodecs opencv_core pthread jpegdecoder)
+target_link_libraries(jpeg_stages glog fftw3 fftw3f opencv_highgui opencv_imgcodecs opencv_core pthread jpegdecoder)
 
 find_package(GTest)
 add_executable(tests test/unit/test_bit_reader.cpp)
