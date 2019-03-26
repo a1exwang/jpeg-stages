@@ -26,21 +26,22 @@ int BitReader::read_nbits_fast(int n, int &output) {
   output = 0;
   int rest = n;
   while (rest >= stream_remaining_bits) {
-    if (stream_remaining_bits == 0) {
-      octet = read_byte();
-      if (octet == 0xFF) {
-        auto b = read_byte();
-        CHECK(b == 0);
-      }
-    }
-
     rest -= stream_remaining_bits;
-    auto mask = (1 << stream_remaining_bits) - 1;
-    auto tmp = ((octet >> (8-stream_remaining_bits)) & mask);
+#ifndef NDEBUG
+    auto tmp = octet & ((1 << stream_remaining_bits) - 1);
     if (stream_remaining_bits > 0) {
       printf("read_nbits: %x, offset=%ld, bitoff=%d, n=%d\n", tmp, next_offset-1, 7-stream_remaining_bits, stream_remaining_bits);
     }
     output |= (tmp << rest);
+#else
+    output |= (octet & ((1 << stream_remaining_bits) - 1)) << rest;
+#endif
+
+    if (rest == 0) {
+      stream_remaining_bits = 0;
+      return n;
+    }
+
     octet = read_byte();
     if (octet == 0xFF) {
       auto b = read_byte();
@@ -56,11 +57,12 @@ int BitReader::read_nbits_fast(int n, int &output) {
   }
   // ASSERT rest <= stream_remaining_bits <= 8
   // Take the MSB(Most significant bit)
-  auto mask = (1 << rest) - 1;
-  auto tmp = (octet >> (stream_remaining_bits - rest)) & mask;
+  auto tmp = (octet >> (stream_remaining_bits - rest)) & ((1 << rest) - 1);
+#ifndef NDEBUG
   if (rest > 0) {
     printf("read_nbits: %x, offset=%ld, bitoff=%d, n=%d\n", tmp, next_offset-1, 8-stream_remaining_bits, rest);
   }
+#endif
   output |= tmp;
   stream_remaining_bits -= rest;
   return n;
@@ -72,4 +74,29 @@ int BitReader::read_nbits_safe(int n, int &output) {
     output |= (read_bit() << (n-i-1));
   }
   return n;
+}
+
+void BitReader::return_nbits(int n) {
+  if (n > (8-stream_remaining_bits)) {
+    n -= (8-stream_remaining_bits);
+    next_offset--;
+    stream_remaining_bits = 0;
+    if (next_offset >= 1 && data[next_offset - 1] == -1) {
+      next_offset--;
+    }
+  }
+
+  stream_remaining_bits += n % 8;
+  next_offset -= int64_t(n / 8);
+  if (int64_t(n / 8) != 0) {
+    if (next_offset >= 1 && data.at(next_offset - 1) == -1) {
+      next_offset--;
+    }
+  }
+  if (next_offset >= 2 && data.at(next_offset - 2) == -1) {
+    octet = data[next_offset-2];
+  } else {
+    octet = data[next_offset-1];
+  }
+//    CHECK(next_offset >= 0);
 }

@@ -447,8 +447,7 @@ public:
     mcu_col_count = ((sof0.cols + c - 1) / c);
     mcu_count = mcu_row_count * mcu_col_count;
 
-    int64_t bit_batch_size = 2;
-    HuffmanDecoder decoder(move(str1), dc_dhts, ac_dhts, bit_batch_size);
+    HuffmanDecoder decoder(move(str1), dc_dhts, ac_dhts);
 
     int64_t total_saved = 0;
     for (int mcu = 0; mcu < mcu_count; ++mcu) {
