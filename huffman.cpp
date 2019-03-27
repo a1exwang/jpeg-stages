@@ -169,29 +169,13 @@ uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree) {
 //    }
     // 0 for left, 1 for right
 //    CHECK(nread == bit_batch_size);
-    auto next_node = tree[current].subtrees[bit_batch_size-1].at(bits);
+    auto next_node = tree.data()[current].subtrees[bit_batch_size-1].data()[bits];
     if (next_node == -1) {
-      // fallback
-      for (int i = 0; i < nread; i++) {
-        int bit = (bits >> (nread - i - 1)) & 1;
-        // 0 for left, 1 for right
-        auto &node = tree[current];
-        current = node.children[bit];
-        NodeValue value = tree[current].value;
-        if (value != NodeValue::NonExisting) {
-          // return remaining bits
-          bit_reader.return_nbits(nread - i - 1);
-#ifndef NDEBUG
-          printf("readtree: return bits: %d\n", nread-i-1);
-#endif
-          return (uint8_t)value;
-        }
-      }
-      LOG(FATAL) << "Unreachable code";
-
+      return read_tree_fallback(tree, current, nread, bits);
     } else {
-      if (int64_t(tree[next_node].value) >= 0) {
-        return uint8_t(tree[next_node].value);
+      auto val = tree.data()[next_node].value;
+      if (int64_t(val) >= 0) {
+        return uint8_t(val);
       } else {
         current = next_node;
       }

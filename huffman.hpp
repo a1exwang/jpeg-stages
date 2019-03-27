@@ -55,6 +55,26 @@ public:
   int64_t read_counter = 0;
   uint8_t read_tree_safe(std::vector<Node> &tree);
   uint8_t read_tree_batched(std::vector<Node> &tree);
+  uint8_t read_tree_fallback(std::vector<Node> &tree, int current, int nread, int bits) {
+    // fallback
+    for (int i = 0; i < nread; i++) {
+      int bit = (bits >> (nread - i - 1)) & 1;
+      // 0 for left, 1 for right
+      auto &node = tree[current];
+      current = node.children[bit];
+      NodeValue value = tree[current].value;
+      if (value != NodeValue::NonExisting) {
+        // return remaining bits
+        bit_reader.return_nbits(nread - i - 1);
+#ifndef NDEBUG
+        printf("readtree: return bits: %d\n", nread-i-1);
+#endif
+        return (uint8_t)value;
+      }
+    }
+    LOG(FATAL) << "Unreachable code";
+
+  }
   int64_t get_offset() { return bit_reader.get_offset(); }
 private:
 
