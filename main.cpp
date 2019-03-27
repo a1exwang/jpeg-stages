@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
 
   if (operation == "tp") {
     int test_times = atoi(argv[3]);
+    int64_t bs = atoi(argv[4]);
     atomic<int64_t> counter{0};
     atomic<bool> exit{false};
     int64_t last_n = 0;
@@ -48,17 +49,18 @@ int main(int argc, char **argv) {
       }
     });
     for (int i = 0; i < test_times; i++) {
-      jst_decode(jpeg_data);
+      jst_decode(jpeg_data, bs);
       counter++;
     }
     exit = true;
     t.join();
   } else if (operation == "show") {
-    cv::Mat mat = jst_decode(jpeg_data);
+    cv::Mat mat = jst_decode(jpeg_data, 2);
     cv::imshow("test", mat);
     cv::waitKey(0);
   } else if (operation == "compare") {
     int times = atoi(argv[3]);
+    int bs = atoi(argv[4]);
     auto t0 = std::chrono::high_resolution_clock::now();
     cv::Mat original;
     for (int i = 0; i < times; i++) {
@@ -69,7 +71,7 @@ int main(int argc, char **argv) {
     auto t2 = std::chrono::high_resolution_clock::now();
     cv::Mat mat;
     for (int i = 0; i < times; i++) {
-      mat = jst_decode(jpeg_data);
+      mat = jst_decode(jpeg_data, bs);
     }
     auto t3 = std::chrono::high_resolution_clock::now();
     cout << "showing diff of first " << crop_w << "x" << crop_h << " values" << endl;
@@ -89,7 +91,7 @@ int main(int argc, char **argv) {
     cout << "time: OpenCV: " << d_cv << "s, my: " << d_my << "s, mine is " << (d_my > d_cv ? d_my/d_cv : d_cv/d_my) << "x " << (d_my>d_cv ? "slower":"faster") << endl;
     cout << "SNR: " << 10*log(snr)/log(10) << "dB" << endl;
   } else if (operation == "decode") {
-    jst_decode(jpeg_data);
+    jst_decode(jpeg_data, 2);
   }
 
 

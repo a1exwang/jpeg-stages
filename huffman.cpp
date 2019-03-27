@@ -20,16 +20,14 @@ static inline int extend(int value, int nBits) {
 
 std::vector<int> HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read) {
   vector<int> ret(count_to_read, 0);
-  int64_t count_read = 0;
+  size_t count_read = 0;
   // Finish building huffman tree
   auto t = read_tree(dc_trees[dc_index]);
   int diff = 0;
-  if (t == 0) {
-    diff = 0;
-  } else {
+  if (t != 0) {
     bit_reader.read_nbits(t, diff);
-    diff = extend(diff, t);
   }
+  diff = extend(diff, t);
 
   ret.at(count_read++) = diff;
 
@@ -51,7 +49,8 @@ std::vector<int> HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_inde
     // decode_zz k
     int zzk = -1;
     bit_reader.read_nbits(ssss, zzk);
-    CHECK(count_read < count_to_read);
+//    CHECK(count_read < count_to_read);
+    // zzk in [0, 2^16), ssss in [0, 16)
     ret.at(count_read++) = extend(zzk, ssss);
   }
   return std::move(ret);

@@ -148,7 +148,7 @@ private:
 
 class JpegFileData {
 public:
-  JpegFileData(string data) :jpeg_data(move(data)) { }
+  JpegFileData(string data, int64_t decode_batch_size) :jpeg_data(move(data)), decode_batch_size(decode_batch_size) { }
 
   void ParseSections() {
     while (true) {
@@ -459,6 +459,7 @@ public:
     skip(length - 2);
     return length;
   }
+  int64_t decode_batch_size;
   std::vector<std::vector<IntTable>> read_entropy() {
     string str1 = jpeg_data.substr(offset);
 
@@ -470,9 +471,16 @@ public:
     mcu_col_count = ((sof0.cols + c - 1) / c);
     mcu_count = mcu_row_count * mcu_col_count;
 
-    HuffmanDecoder decoder(move(str1), dc_dhts, ac_dhts);
+    HuffmanDecoder decoder(move(str1), dc_dhts, ac_dhts, decode_batch_size);
 
     int64_t total_saved = 0;
+    for (int c = 0; c < sof0.component_count; ++c) {
+      std::vector<IntTable> &component_tables = tables[c];
+      int n_tables =
+          sof0.component_parameters[c].horizontal_sampling_factor *
+          sof0.component_parameters[c].vertical_sampling_factor;
+      component_tables.reserve(n_tables * mcu_count);
+    }
     for (int mcu = 0; mcu < mcu_count; ++mcu) {
       for (int c = 0; c < sof0.component_count; ++c) {
         std::vector<IntTable>& component_tables = tables[c];
@@ -484,8 +492,8 @@ public:
           IntTable table;
 
           auto data = decoder.HuffmanDecode(dc_ids[c], ac_ids[c], kBlockSize);
-          fill_matrix_in_zigzag(data.begin(), table.begin(), kBlockSide, kBlockSide);
-//          fill_matrix_in_zigzag_fast64(data.begin(), table.begin());
+//          fill_matrix_in_zigzag(data.begin(), table.begin(), kBlockSide, kBlockSide);
+          fill_matrix_in_zigzag_fast64(data.data(), table.data());
 
           if (!component_tables.empty()) {
             // differential encoded for DC values
@@ -624,8 +632,8 @@ cv::Mat JpegFileData::ConvertColorSpaceAVX() {
 
 }
 
-cv::Mat jst_decode(const std::string &jpeg_data, bool verbose) {
-  JpegFileData jpeg(jpeg_data);
+cv::Mat jst_decode(const std::string &jpeg_data, int64_t decode_batch_size, bool verbose) {
+  JpegFileData jpeg(jpeg_data, decode_batch_size);
 
   jpeg.ParseSections();
   jpeg.DecodeDataBatch();

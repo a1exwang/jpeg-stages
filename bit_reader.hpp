@@ -74,6 +74,7 @@ public:
     return n;
   }
   int read_nbits_safe(int n, int &output);
+
   void return_bit() {
     if (stream_remaining_bits < 7) {
       stream_remaining_bits++;

@@ -40,7 +40,6 @@ public:
   );
 
   std::vector<int> HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read);
-  std::vector<int> HuffmanDecodeDFA(int64_t dc_index, int64_t ac_index, int64_t count_to_read);
   uint8_t read_tree(std::vector<Node> &tree) {
 #ifndef NDEBUG
     printf("readtree start\n");
