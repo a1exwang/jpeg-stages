@@ -189,26 +189,53 @@ uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree) {
   }
   while (true) {
     int bits;
-    int nread = bit_reader.read_nbits(bit_batch_size, bits);
+    int bit_count = bit_reader.read_nbits(bit_batch_size, bits);
 //    if (bits < 0) {
 //      cerr << "Invalid entropy stream, unexpected EOF" << endl;
 //      abort();
 //    }
-    // 0 for left, 1 for right
-//    CHECK(nread == bit_batch_size);
-    auto next_node = current->subtrees[bit_batch_size-1][bits];
-    if (next_node == nullptr) {
-      return read_tree_fallback(tree, current, nread, bits);
-    } else {
-      auto val = next_node->value;
-      if (int64_t(val) >= 0) {
-        return uint8_t(val);
-      } else {
-        current = next_node;
-      }
+//    CHECK(bit_count > 0);
+    uint8_t value;
+    bool is_leaf = read_tree_nbits(&current, bit_count, bits, value);
+    if (bit_count > 0) {
+      bit_reader.return_nbits(bit_count);
+    }
+    if (is_leaf) {
+      return value;
     }
   }
 }
+
+bool HuffmanDecoder::read_tree_nbits(HuffmanDecoder::Node **current, int &batch_size, int bits, uint8_t &value) {
+  auto next_node = (*current)->subtrees[batch_size-1][bits];
+  /**
+   * Make one big step in the Huffman tree.
+   * There are 3 circumstances:
+   * 1. The step is too big, let's go half of the step size;
+   * 2. The step is too small to reach a leaf node, return current node and bit count;
+   * 3. The step is just enough to reach a leaf node, return the leaf value.
+   */
+  if (next_node == nullptr) {
+//    CHECK(batch_size > 1);
+    auto shift_size = (batch_size-batch_size/2);
+    batch_size /= 2;
+    bool ok = read_tree_nbits(current, batch_size, bits >> shift_size, value);
+    batch_size += shift_size;
+    return ok;
+  } else {
+    auto val = next_node->value;
+    if (int64_t(val) >= 0) {
+      batch_size = 0;
+      value = int8_t(val);
+      return true;
+    } else {
+      batch_size = 0;
+      *current = next_node;
+      return false;
+    }
+  }
+}
+
 
 HuffmanDecoder::Node *HuffmanDecoder::take_precedence(
     vector<HuffmanDecoder::Node> &tree,

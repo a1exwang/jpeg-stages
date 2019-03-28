@@ -24,8 +24,8 @@
 
 using namespace std;
 
-const int kBlockSide = 8;
-const int kBlockSize = kBlockSide * kBlockSide;
+constexpr int kBlockSide = 8;
+constexpr int kBlockSize = kBlockSide * kBlockSide;
 using IntTable = std::array<int, kBlockSize>;
 using FloatTable = std::array<float, kBlockSize>;
 constexpr uint8_t JpegSectionStartByte = 0xff;
@@ -35,6 +35,9 @@ template <typename T>
 T clip(T x, T lb, T ub) {
   return std::min(std::max(x, lb), ub);
 }
+constexpr float fac = 0.5f / kBlockSide;
+constexpr float fac0 = 1.4142135623730951f * fac;
+constexpr float fac00 = 1.0f / kBlockSide;
 
 
 constexpr uint8_t JpegSOF0Mark = 0xc0;
@@ -292,40 +295,33 @@ public:
     fftwf_destroy_plan(plan);
   }
   // total size is width*height*batch_size
-  void apply_idct_batch(const float *table, float *output, int64_t width, int64_t height, int64_t batch_size) {
-    auto input = make_unique<float[]>(static_cast<size_t>(width * height * batch_size));
+  void apply_idct_batch_inplace(float *table, float *output, int64_t width, int64_t height, int64_t batch_size) {
+    CHECK(width == 8 && height == 8);
 
     // prepare
     int64_t block_size = width * height;
+
+    __m256 first_row_fac = _mm256_set_ps(fac0, fac0, fac0, fac0, fac0, fac0, fac0, fac00);
+    __m256 row_fac = _mm256_set_ps(fac, fac, fac, fac, fac, fac, fac, fac0);
     for (int64_t b = 0; b < batch_size; b++) {
       int k = 0;
       int64_t batch_offset = b*block_size;
-      constexpr double fac = 0.5 / kBlockSide;
-      float fac0 = std::sqrt(2);
+      // per block
       for (int i = 0; i < width; ++i) {
-        for (int j = 0; j < height; ++j) {
-          input[batch_offset + k] = table[batch_offset + k] * fac;
-          if (i == 0) {
-            input[batch_offset + k] *= fac0;
-          }
-          if (j == 0) {
-            input[batch_offset + k] *= fac0;
-          }
-          ++k;
+        __m256 row = _mm256_load_ps(&table[batch_offset + k]);
+        if (i == 0) {
+          row = _mm256_mul_ps(row, first_row_fac);
+        } else {
+          row = _mm256_mul_ps(row, row_fac);
         }
+        _mm256_store_ps(&table[batch_offset + k], row);
+        k += 8;
       }
     }
-//    for (int64_t b = 0; b < batch_size; b++) {
-//      int64_t batch_offset = b*block_size;
-//      fftw_plan plan = fftw_plan_r2r_2d(kBlockSide, kBlockSide, input.get() + batch_offset, output + batch_offset,
-//                                        FFTW_REDFT01, FFTW_REDFT01, 0);
-//
-//      fftw_execute(plan);
-//      fftw_destroy_plan(plan);
-//    }
+
     int n[] = {kBlockSide, kBlockSide};
     fftwf_r2r_kind kinds[] = {FFTW_REDFT01, FFTW_REDFT01};
-    fftwf_plan plan = fftwf_plan_many_r2r(2, n, batch_size, input.get(), n, 1, block_size, output, n, 1, block_size, kinds, 0);
+    fftwf_plan plan = fftwf_plan_many_r2r(2, n, batch_size, table, n, 1, block_size, output, n, 1, block_size, kinds, 0);
     fftwf_execute(plan);
     fftwf_destroy_plan(plan);
   }
@@ -334,7 +330,8 @@ public:
     for (int c = 0; c < sof0.component_count; c++) {
       done.emplace_back(mcu_count);
 
-      auto my_decoded_data = make_unique<float[]>(static_cast<size_t>(kBlockSide * kBlockSide * mcu_count));
+      auto my_decoded_data = std::unique_ptr<float[], decltype(&free)>((float*)aligned_alloc(256, kBlockSize * mcu_count*sizeof(float)), &free);
+//      auto my_decoded_data = make_unique<float[]>(static_cast<size_t>(kBlockSide * kBlockSide * mcu_count));
       const auto &current_q_table =
           quantization_tables[sof0.component_parameters[c].quantization_table_id];
       for (int x = 0; x < mcu_count; x++) {
@@ -345,7 +342,7 @@ public:
       done_batched.push_back(
           std::unique_ptr<float, decltype(&free)>((float*)aligned_alloc(256, kBlockSize * mcu_count*sizeof(float)), &free)
       );
-      apply_idct_batch(my_decoded_data.get(), done_batched[c].get(), kBlockSide, kBlockSide, mcu_count);
+      apply_idct_batch_inplace(my_decoded_data.get(), done_batched[c].get(), kBlockSide, kBlockSide, mcu_count);
     }
   }
 

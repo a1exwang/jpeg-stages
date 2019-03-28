@@ -59,8 +59,10 @@ public:
   int64_t read_counter = 0;
   uint8_t read_tree_safe(std::vector<Node> &tree);
   uint8_t read_tree_batched(std::vector<Node> &tree);
+  bool read_tree_nbits(Node **node, int &batch_size, int bits, uint8_t &value);
   uint8_t read_tree_fallback(std::vector<Node> &tree, Node *current, int nread, int bits) {
     // fallback
+
     Node *node = current;
     for (int i = 0; i < nread; i++) {
       int bit = (bits >> (nread - i - 1)) & 1;
