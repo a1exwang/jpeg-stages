@@ -55,8 +55,15 @@ int main(int argc, char **argv) {
     exit = true;
     t.join();
   } else if (operation == "show") {
-    cv::Mat mat = jst_decode(jpeg_data, 2);
-    cv::imshow("test", mat);
+    int nbits = atoi(argv[3]);
+    cv::Mat mat = jst_decode(jpeg_data, nbits);
+    cv::Mat original = cv::imread(file_path);
+    cv::Mat roi = cv::Mat(mat.rows, mat.cols*2 + 100, CV_8UC3);
+    auto roi1 = roi(cv::Rect(0, 0, original.cols, original.rows));
+    original.copyTo(roi1);
+    auto roi2 = roi(cv::Rect(mat.cols+100, 0, mat.cols, mat.rows));
+    mat.copyTo(roi2);
+    cv::imshow("test", roi);
     cv::waitKey(0);
   } else if (operation == "compare") {
     int times = atoi(argv[3]);
@@ -67,7 +74,7 @@ int main(int argc, char **argv) {
       original = cv::imread(file_path);
     }
     auto t1 = std::chrono::high_resolution_clock::now();
-    int crop_w = 3, crop_h = 3;
+    int crop_w = 100, crop_h = 100;
     auto t2 = std::chrono::high_resolution_clock::now();
     cv::Mat mat;
     for (int i = 0; i < times; i++) {
@@ -85,14 +92,15 @@ int main(int argc, char **argv) {
       }
       cout << endl;
     }
-    double snr = cv::norm(mat-original) / cv::norm(original);
+    double snr = cv::norm(mat, original, cv::NORM_L2) / (mat.cols*mat.rows*3*255);
     auto d_cv = chrono::duration<double>(t1 - t0).count();
     auto d_my = chrono::duration<double>(t3 - t2).count();
     cout << "time: OpenCV: " << d_cv << "s, my: " << d_my << "s, mine is " << (d_my > d_cv ? d_my/d_cv : d_cv/d_my) << "x " << (d_my>d_cv ? "slower":"faster") << endl;
     double db = 10*log(snr)/log(10);
-    cout << "SNR: " << db << "dB" << endl;
-    if (db > -20) {
-      cout << "Warning!!!!!!!!!!!!!!!! SNR is greater than -20dB" << endl;
+    cout << "SNR: " << snr << " " << db << "dB" << endl;
+    float db_limit = -50;
+    if (db > db_limit) {
+      cout << "Warning!!!!!!!!!!!!!!!! SNR is greater than " << db_limit << "dB" << endl;
     }
   } else if (operation == "decode") {
     jst_decode(jpeg_data, 2);

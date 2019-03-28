@@ -28,21 +28,29 @@ public:
     return ret;
   }
   int read_nbits(int n, int &output) { return read_nbits_fast(n, output); }
+  static void print_bits(std::ostream &os, int bits, int n) {
+    CHECK(n > 0);
+    int mask = 1 << (n-1);
+    for (int i = 0; i < n; i ++) {
+      os << (((bits & mask) == 0) ? "0" : "1");
+      mask >>= 1;
+    }
+  }
   int read_nbits_fast(int n, int &output) {
+#ifndef NDEBUG
+    int64_t original_offset = next_offset-1;
+    int original_bit_offset = 8-stream_remaining_bits;
+
+    std::cout << "  read_nbits:"
+              << " offset0=" << original_offset
+              << " bitoff0=" << original_bit_offset << " {" << std::endl;
+#endif
+
     output = 0;
     int rest = n;
     while (rest >= stream_remaining_bits) {
       rest -= stream_remaining_bits;
-#ifndef NDEBUG
-      auto tmp = octet & ((1 << stream_remaining_bits) - 1);
-      if (stream_remaining_bits > 0) {
-        printf("read_nbits: %x, offset=%ld, bitoff=%d, n=%d\n", tmp, next_offset-1, 7-stream_remaining_bits, stream_remaining_bits);
-      }
-      output |= (tmp << rest);
-#else
       output |= (octet & ((1 << stream_remaining_bits) - 1)) << rest;
-#endif
-
       if (rest == 0) {
         stream_remaining_bits = 0;
         return n;
@@ -57,6 +65,15 @@ public:
       // old_octet[0..stream_remaining_bits-1], octet[8..8-n1+1]
       if (next_offset > data.size()) {
         output >>= rest;
+#ifndef NDEBUG
+        if (n - rest > 0) {
+          std::stringstream ss;
+          print_bits(ss, output, n-rest);
+          std::cout << "  } n=" << n-rest
+                    << " value=0b" << ss.str()
+                    << "(0x" << std::hex << output << std::dec << ")" << std::endl;
+        }
+#endif
         return n - rest;
       }
       stream_remaining_bits = 8;
@@ -64,13 +81,19 @@ public:
     // ASSERT rest <= stream_remaining_bits <= 8
     // Take the MSB(Most significant bit)
     auto tmp = (octet >> (stream_remaining_bits - rest)) & ((1 << rest) - 1);
-#ifndef NDEBUG
-    if (rest > 0) {
-      printf("read_nbits: %x, offset=%ld, bitoff=%d, n=%d\n", tmp, next_offset-1, 8-stream_remaining_bits, rest);
-    }
-#endif
     output |= tmp;
     stream_remaining_bits -= rest;
+
+#ifndef NDEBUG
+    if (n > 0) {
+      std::stringstream ss;
+      print_bits(ss, output, n);
+      std::cout << "  }"
+                << " n=" << n
+                << " value=0b" << ss.str()
+                << "(0x" << std::hex << output << std::dec << ")" << std::endl;
+    }
+#endif
     return n;
   }
   int read_nbits_safe(int n, int &output);
@@ -90,6 +113,9 @@ public:
     stream_remaining_bits = 0;
   }
   void return_nbits(int n) {
+#ifndef NDEBUG
+    std::cout << "  return_nbits: " << n << std::endl;
+#endif
     if (n > (8-stream_remaining_bits)) {
       n -= (8-stream_remaining_bits);
       next_offset--;
@@ -118,7 +144,7 @@ private:
   int read_byte() {
     auto ret = (int)(uint32_t)(uint8_t)data[next_offset++];
 #ifndef NDEBUG
-    printf("read_byte: %x\n", ret);
+    printf("    read_byte: %x\n", ret);
 #endif
     return ret;
   }

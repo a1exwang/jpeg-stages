@@ -44,21 +44,21 @@ public:
   );
 
   std::vector<int> HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read);
-  uint8_t read_tree(std::vector<Node> &tree) {
+  uint8_t read_tree(std::vector<Node> &tree, int &zzk, bool is_dc) {
 #ifndef NDEBUG
-    printf("readtree start\n");
+    printf("readtree {\n");
 #endif
-    auto ret = read_tree_batched(tree);
+    auto ret = read_tree_batched(tree, zzk, is_dc);
 //    auto ret = read_tree_safe(tree);
     read_counter++;
 #ifndef NDEBUG
-    printf("readtree: %d n=%ld\n", ret, read_counter);
+    printf("} %d n=%ld\n", ret, read_counter);
 #endif
     return ret;
   }
   int64_t read_counter = 0;
   uint8_t read_tree_safe(std::vector<Node> &tree);
-  uint8_t read_tree_batched(std::vector<Node> &tree);
+  uint8_t read_tree_batched(std::vector<Node> &tree, int &zzk, bool is_dc);
   bool read_tree_nbits(Node **node, int &batch_size, int bits, uint8_t &value);
   uint8_t read_tree_fallback(std::vector<Node> &tree, Node *current, int nread, int bits) {
     // fallback

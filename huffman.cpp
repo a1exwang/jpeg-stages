@@ -22,17 +22,15 @@ std::vector<int> HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_inde
   vector<int> ret(count_to_read, 0);
   size_t count_read = 0;
   // Finish building huffman tree
-  auto t = read_tree(dc_trees[dc_index]);
   int diff = 0;
-  if (t != 0) {
-    bit_reader.read_nbits(t, diff);
-  }
+  auto t = read_tree(dc_trees[dc_index], diff, true);
   diff = extend(diff, t);
 
   ret.at(count_read++) = diff;
 
   while (count_read < count_to_read) {
-    auto ac_value = read_tree(ac_trees.at(ac_index));
+    int zzk = 0;
+    auto ac_value = read_tree(ac_trees.at(ac_index), zzk, false);
     int r = (ac_value >> 4) & 0xF;
     int ssss = (ac_value & 0xF);
     if (ssss == 0) {
@@ -45,12 +43,6 @@ std::vector<int> HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_inde
     }
     // ssss > 0
     count_read += r;
-
-    // decode_zz k
-    int zzk = -1;
-    bit_reader.read_nbits(ssss, zzk);
-//    CHECK(count_read < count_to_read);
-    // zzk in [0, 2^16), ssss in [0, 16)
     ret.at(count_read++) = extend(zzk, ssss);
   }
   return std::move(ret);
@@ -180,16 +172,12 @@ void HuffmanDecoder::build_subtree(vector<vector<HuffmanDecoder::Node>> &trees, 
   }
 }
 
-uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree) {
+uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree, int &zzk, bool is_dc) {
   Node *current = &tree[0];
-  if (!cached_values.empty()) {
-    auto ret = cached_values.front();
-    cached_values.pop();
-    return ret;
-  }
   while (true) {
     int bits;
     int bit_count = bit_reader.read_nbits(bit_batch_size, bits);
+    int original_bit_count = bit_count;
 //    if (bits < 0) {
 //      cerr << "Invalid entropy stream, unexpected EOF" << endl;
 //      abort();
@@ -197,10 +185,33 @@ uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree) {
 //    CHECK(bit_count > 0);
     uint8_t value;
     bool is_leaf = read_tree_nbits(&current, bit_count, bits, value);
-    if (bit_count > 0) {
+    if (bit_count > 0 && !is_leaf) {
       bit_reader.return_nbits(bit_count);
     }
     if (is_leaf) {
+      int ssss = is_dc ? value : (value & 0xF);
+      zzk = 0;
+
+      static int bit_count_mask[] = {
+          0b0, 0b1, 0b11, 0b111,
+          0b1111, 0b11111, 0b111111, 0b1111111,
+          0b11111111, 0b111111111, 0b1111111111, 0b11111111111,
+          0b111111111111, 0b1111111111111, 0b11111111111111, 0b111111111111111,
+      };
+      // TODO(aocheng): Determine which implementation is faster
+      // Current benchmarks show the table implemention is slightly faster(0.97% vs 0.70% of total time)
+      // But that might depends on other facters, so I leave the other implementation here for further tests.
+//      bits &= (1<<bit_count) - 1;
+      bits &= bit_count_mask[bit_count];
+      if (bit_count > ssss) {
+        bit_reader.return_nbits(bit_count - ssss);
+        zzk = bits >> (bit_count - ssss);
+      } else if (bit_count < ssss) {
+        bit_reader.read_nbits(ssss - bit_count, zzk);
+        zzk |= bits << (ssss - bit_count);
+      } else {
+        zzk = bits;
+      }
       return value;
     }
   }

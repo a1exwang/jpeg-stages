@@ -265,35 +265,8 @@ public:
         }
       }
     }
-
-
   }
 
-  void applyIDCT(const IntTable& table, FloatTable &output) {
-    FloatTable input;
-
-    int k = 0;
-    constexpr double fac = 0.5 / kBlockSide;
-    double fac0 = std::sqrt(2);
-    for (int i = 0; i < kBlockSide; ++i) {
-      for (int j = 0; j < kBlockSide; ++j) {
-        input[k] = table[k] * fac;
-        if (i == 0) {
-          input[k] *= fac0;
-        }
-        if (j == 0) {
-          input[k] *= fac0;
-        }
-        ++k;
-      }
-    }
-
-    fftwf_plan plan = fftwf_plan_r2r_2d(kBlockSide, kBlockSide, input.data(), output.data(),
-                                      FFTW_REDFT01, FFTW_REDFT01, 0);
-
-    fftwf_execute(plan);
-    fftwf_destroy_plan(plan);
-  }
   // total size is width*height*batch_size
   void apply_idct_batch_inplace(float *table, float *output, int64_t width, int64_t height, int64_t batch_size) {
     CHECK(width == 8 && height == 8);
@@ -328,10 +301,8 @@ public:
 
   void DecodeDataBatch() {
     for (int c = 0; c < sof0.component_count; c++) {
-      done.emplace_back(mcu_count);
 
       auto my_decoded_data = std::unique_ptr<float[], decltype(&free)>((float*)aligned_alloc(256, kBlockSize * mcu_count*sizeof(float)), &free);
-//      auto my_decoded_data = make_unique<float[]>(static_cast<size_t>(kBlockSide * kBlockSide * mcu_count));
       const auto &current_q_table =
           quantization_tables[sof0.component_parameters[c].quantization_table_id];
       for (int x = 0; x < mcu_count; x++) {
@@ -347,35 +318,6 @@ public:
   }
 
   cv::Mat ConvertColorSpaceAVX();
-
-  cv::Mat ConvertColorSpaceBatched() {
-    cv::Mat mat(sof0.lines, sof0.cols, CV_8UC3);
-    for (int i = 0; i < mcu_row_count; i++) {
-      for (int j = 0; j < mcu_col_count; j++) {
-        for (int x = 0; x < kBlockSide; x++) {
-          for (int y = 0; y < kBlockSide; y++) {
-            auto row = i * kBlockSide + x;
-            auto col = j * kBlockSide + y;
-            if (row < sof0.lines && col < sof0.cols) {
-              float yy = done_batched.at(0).get()[(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
-              float cb = done_batched.at(1).get()[(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
-              float cr = done_batched.at(2).get()[(i*mcu_col_count + j)*kBlockSize + x * kBlockSide + y];
-
-              float r = yy + 1.402f * cr + 128.0f;
-              float g = yy - 0.34414f * cb - 0.71414f * cr + 128.0f;
-              float b = yy + 1.772f * cb + 128.0f;
-
-              r = clip(r, 0.0f, 255.0f);
-              g = clip(g, 0.0f, 255.0f);
-              b = clip(b, 0.0f, 255.0f);
-              mat.at<cv::Vec3b>(row, col) = {(uint8_t)b, (uint8_t)g, (uint8_t)r};
-            }
-          }
-        }
-      }
-    }
-    return mat;
-  }
 public:
   QuantizationTable parse_q() {
     uint8_t qh = read_byte();
@@ -544,9 +486,6 @@ public:
 
   vector<vector<float>> dense_decoded_data;
   vector<vector<IntTable>> decoded_data;
-  vector<vector<FloatTable>> done;
-  // c * (mcu_count*kBlockSize)
-//  vector<vector<float>> done_batched;
   vector<std::unique_ptr<float, decltype(&free)>> done_batched;
 
   int mcu_count, mcu_row_count, mcu_col_count;
