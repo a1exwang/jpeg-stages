@@ -25,11 +25,15 @@ enum class NodeValue :int64_t {
 class HuffmanDecoder {
 public:
   struct Node {
+    Node() :value(NodeValue::NonExisting), index(-1) { }
     Node(NodeValue value, int64_t index) :value(value), index(index) { }
     NodeValue value;
-    std::vector<std::vector<int64_t>> subtrees;
-    int64_t children[2]{-1, -1};
+    std::vector<std::vector<Node*>> subtrees;
+    Node *children[2]{nullptr, nullptr};
     int64_t index;
+
+    Node(const NodeValue &) = delete;
+    Node &operator=(const NodeValue &) = delete;
   };
 
   explicit HuffmanDecoder(
@@ -55,14 +59,14 @@ public:
   int64_t read_counter = 0;
   uint8_t read_tree_safe(std::vector<Node> &tree);
   uint8_t read_tree_batched(std::vector<Node> &tree);
-  uint8_t read_tree_fallback(std::vector<Node> &tree, int current, int nread, int bits) {
+  uint8_t read_tree_fallback(std::vector<Node> &tree, Node *current, int nread, int bits) {
     // fallback
+    Node *node = current;
     for (int i = 0; i < nread; i++) {
       int bit = (bits >> (nread - i - 1)) & 1;
       // 0 for left, 1 for right
-      auto &node = tree[current];
-      current = node.children[bit];
-      NodeValue value = tree[current].value;
+      node = node->children[bit];
+      NodeValue value = node->value;
       if (value != NodeValue::NonExisting) {
         // return remaining bits
         bit_reader.return_nbits(nread - i - 1);
@@ -73,26 +77,16 @@ public:
       }
     }
     LOG(FATAL) << "Unreachable code";
-
+    return 0;
   }
   int64_t get_offset() { return bit_reader.get_offset(); }
 private:
-
-  static Node &left_node(std::vector<Node>& tree, const Node &node) {
-//    CHECK(node.left >= 0);
-    return tree[node.children[0]];
-  }
-  static Node &right_node(std::vector<Node>& tree, const Node &node) {
-//    CHECK(node.right >= 0);
-    return tree[node.children[1]];
-  }
-
   static void convert_table_to_tree(
       std::map<int64_t, HuffmanTable> dht,
       std::vector<std::vector<Node>> &trees);
 
   static void build_subtree(std::vector<std::vector<Node>> &trees, int max_depth);
-  static int64_t take_precedence(std::vector<Node> &tree, Node &node, int64_t child_id, int64_t nbits);
+  static Node *take_precedence(std::vector<Node> &tree, Node &node, int64_t child_id, int64_t nbits);
 
   std::vector<std::vector<Node>> dc_trees;
   std::vector<std::vector<Node>> ac_trees;

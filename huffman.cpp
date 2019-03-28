@@ -70,7 +70,7 @@ HuffmanDecoder::HuffmanDecoder(
 }
 
 uint8_t HuffmanDecoder::read_tree_safe(std::vector<Node> &tree) {
-  int64_t current = 0;
+  Node *current = nullptr;
   while (true) {
     int bit = bit_reader.read_bit();
     if (bit < 0) {
@@ -78,8 +78,9 @@ uint8_t HuffmanDecoder::read_tree_safe(std::vector<Node> &tree) {
       abort();
     }
     // 0 for left, 1 for right
-    NodeValue value = tree[tree[current].children[bit]].value;
-    current = tree[current].children[bit];
+
+    NodeValue value = current->children[bit]->value;
+    current = current->children[bit];
     if (value != NodeValue::NonExisting) {
       // yield data
       return (uint8_t)value;
@@ -99,12 +100,35 @@ void HuffmanDecoder::convert_table_to_tree(
     auto &tree = trees[i];
     auto it = ac_values.begin();
     size_t skip = 0;
-    tree.emplace_back(NodeValue::NonExisting, tree.size());
+
+
+    // root node
+    int n = 1;
+    for (int depth = 0; depth < ac_counts.size(); depth++) {
+      skip = (skip + (depth == 0 ? 0 : ac_counts[depth - 1])) * 2;
+      // leaf nodes
+      n += ac_counts[depth];
+      // inner nodes
+      n += (1UL << (depth + 1)) - (skip + ac_counts[depth]);
+    }
+    tree.resize(n);
+
+    // root node
+    size_t index = 0;
+
+    tree[index].value = NodeValue::NonExisting;
+    tree[index].index = index;
+    index++;
+
     size_t last_mid_node_start = 0;
+    skip = 0;
     for (int depth = 0; depth < ac_counts.size(); depth++) {
       skip = (skip + (depth == 0 ? 0 : ac_counts[depth-1]))* 2;
+      // leaf nodes
       for (int j = 0; j < /*width*/ ac_counts[depth]; j++) {
-        tree.emplace_back(NodeValue(*it++), tree.size());
+        tree.at(index).value = NodeValue(*it++);
+        tree.at(index).index = index;
+        index++;
         // <depth+1, skip+j>
 
         // if last_mid_node left is empty
@@ -112,22 +136,25 @@ void HuffmanDecoder::convert_table_to_tree(
         // else
         //   put in right
         //   last_mid_node_start++;
-        if (tree[last_mid_node_start].children[0] == -1) {
-          tree[last_mid_node_start].children[0] = tree.size()-1;
+        if (tree.at(last_mid_node_start).children[0] == nullptr) {
+          tree.at(last_mid_node_start).children[0] = &tree.at(index-1);
         } else {
-          tree[last_mid_node_start].children[1] = tree.size()-1;
+          tree.at(last_mid_node_start).children[1] = &tree.at(index-1);
           last_mid_node_start++;
         }
       }
-      auto mid_node_start = tree.size();
+      auto mid_node_start = index;
+      // inner nodes
       for (size_t j = skip + ac_counts[depth]; j < (1UL << (depth+1)); j++) {
-        if (tree[last_mid_node_start].children[0] == -1) {
-          tree[last_mid_node_start].children[0] = tree.size();
+        tree[index].value = NodeValue::NonExisting;
+        tree[index].index = index;
+        index++;
+        if (tree.at(last_mid_node_start).children[0] == nullptr) {
+          tree.at(last_mid_node_start).children[0] = &tree.at(index-1);
         } else {
-          tree[last_mid_node_start].children[1] = tree.size();
+          tree.at(last_mid_node_start).children[1] = &tree.at(index-1);
           last_mid_node_start++;
         }
-        tree.emplace_back(NodeValue::NonExisting, tree.size());
         // if last_mid_node left is empty
         //   put in left
         // else
@@ -154,7 +181,7 @@ void HuffmanDecoder::build_subtree(vector<vector<HuffmanDecoder::Node>> &trees, 
 }
 
 uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree) {
-  int64_t current = 0;
+  Node *current = &tree[0];
   if (!cached_values.empty()) {
     auto ret = cached_values.front();
     cached_values.pop();
@@ -169,11 +196,11 @@ uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree) {
 //    }
     // 0 for left, 1 for right
 //    CHECK(nread == bit_batch_size);
-    auto next_node = tree.data()[current].subtrees[bit_batch_size-1].data()[bits];
-    if (next_node == -1) {
+    auto next_node = current->subtrees[bit_batch_size-1][bits];
+    if (next_node == nullptr) {
       return read_tree_fallback(tree, current, nread, bits);
     } else {
-      auto val = tree.data()[next_node].value;
+      auto val = next_node->value;
       if (int64_t(val) >= 0) {
         return uint8_t(val);
       } else {
@@ -183,7 +210,7 @@ uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree) {
   }
 }
 
-int64_t HuffmanDecoder::take_precedence(
+HuffmanDecoder::Node *HuffmanDecoder::take_precedence(
     vector<HuffmanDecoder::Node> &tree,
     HuffmanDecoder::Node &node,
     int64_t child_id,
@@ -193,15 +220,13 @@ int64_t HuffmanDecoder::take_precedence(
   Node *current_node = &node;
   for (int64_t i = nbits-1; i >= 0; i--) {
     int64_t current_bit = (child_id >> i) & 0x1;
-    auto next_index = current_node->children[current_bit];
+    current_node = current_node->children[current_bit];
 //    CHECK(next_index >= 0);
-    if (next_index < 0) {
-      return -1;
+    if (current_node == nullptr) {
+      return nullptr;
     }
-
-    current_node = &tree[next_index];
   }
-  return current_node->index;
+  return current_node;
 
 }
 
