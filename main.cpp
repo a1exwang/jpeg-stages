@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
       original = cv::imread(file_path);
     }
     auto t1 = std::chrono::high_resolution_clock::now();
-    int crop_w = 10, crop_h = 10;
+    int crop_w = 3, crop_h = 3;
     auto t2 = std::chrono::high_resolution_clock::now();
     cv::Mat mat;
     for (int i = 0; i < times; i++) {
@@ -89,7 +89,11 @@ int main(int argc, char **argv) {
     auto d_cv = chrono::duration<double>(t1 - t0).count();
     auto d_my = chrono::duration<double>(t3 - t2).count();
     cout << "time: OpenCV: " << d_cv << "s, my: " << d_my << "s, mine is " << (d_my > d_cv ? d_my/d_cv : d_cv/d_my) << "x " << (d_my>d_cv ? "slower":"faster") << endl;
-    cout << "SNR: " << 10*log(snr)/log(10) << "dB" << endl;
+    double db = 10*log(snr)/log(10);
+    cout << "SNR: " << db << "dB" << endl;
+    if (db > -20) {
+      cout << "Warning!!!!!!!!!!!!!!!! SNR is greater than -20dB" << endl;
+    }
   } else if (operation == "decode") {
     jst_decode(jpeg_data, 2);
   }
