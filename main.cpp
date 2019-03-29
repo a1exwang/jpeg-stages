@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
       original = cv::imread(file_path);
     }
     auto t1 = std::chrono::high_resolution_clock::now();
-    int crop_w = 100, crop_h = 100;
+    int crop_w = 3, crop_h = 3;
     auto t2 = std::chrono::high_resolution_clock::now();
     cv::Mat mat;
     for (int i = 0; i < times; i++) {

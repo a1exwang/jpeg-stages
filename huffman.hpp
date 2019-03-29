@@ -43,12 +43,12 @@ public:
       int64_t bit_batch_size = 4
   );
 
-  std::vector<int> HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read);
-  uint8_t read_tree(std::vector<Node> &tree, int &zzk, bool is_dc) {
+  std::vector<int> HuffmanDecode(int64_t dc_index, int64_t ac_index, size_t count_to_read);
+  int read_tree(std::vector<Node> &tree, bool is_dc, bool &done, int &jump) {
 #ifndef NDEBUG
     printf("readtree {\n");
 #endif
-    auto ret = read_tree_batched(tree, zzk, is_dc);
+    auto ret = read_tree_batched(tree, is_dc, done, jump);
 //    auto ret = read_tree_safe(tree);
     read_counter++;
 #ifndef NDEBUG
@@ -58,7 +58,7 @@ public:
   }
   int64_t read_counter = 0;
   uint8_t read_tree_safe(std::vector<Node> &tree);
-  uint8_t read_tree_batched(std::vector<Node> &tree, int &zzk, bool is_dc);
+  int read_tree_batched(std::vector<Node> &tree, bool is_dc, bool &done, int &jump);
   bool read_tree_nbits(Node **node, int &batch_size, int bits, uint8_t &value);
   uint8_t read_tree_fallback(std::vector<Node> &tree, Node *current, int nread, int bits) {
     // fallback

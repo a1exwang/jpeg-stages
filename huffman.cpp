@@ -18,32 +18,22 @@ static inline int extend(int value, int nBits) {
   return value;
 }
 
-std::vector<int> HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_index, int64_t count_to_read) {
+std::vector<int> HuffmanDecoder::HuffmanDecode(int64_t dc_index, int64_t ac_index, size_t count_to_read) {
   vector<int> ret(count_to_read, 0);
   size_t count_read = 0;
   // Finish building huffman tree
-  int diff = 0;
-  auto t = read_tree(dc_trees[dc_index], diff, true);
-  diff = extend(diff, t);
-
-  ret.at(count_read++) = diff;
+  bool done;
+  int jump;
+  int zzk = read_tree(dc_trees[dc_index], true, done, jump);
+  ret.at(count_read++) = zzk;
 
   while (count_read < count_to_read) {
-    int zzk = 0;
-    auto ac_value = read_tree(ac_trees.at(ac_index), zzk, false);
-    int r = (ac_value >> 4) & 0xF;
-    int ssss = (ac_value & 0xF);
-    if (ssss == 0) {
-      if (r == 15) {
-        count_read += 16;
-        continue;
-      } else {
-        break;
-      }
+    zzk = read_tree(ac_trees.at(ac_index), false, done, jump);
+    if (done) {
+      break;
     }
-    // ssss > 0
-    count_read += r;
-    ret.at(count_read++) = extend(zzk, ssss);
+    count_read += jump;
+    ret.at(count_read++) = zzk;
   }
   return std::move(ret);
 }
@@ -172,7 +162,8 @@ void HuffmanDecoder::build_subtree(vector<vector<HuffmanDecoder::Node>> &trees, 
   }
 }
 
-uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree, int &zzk, bool is_dc) {
+int HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree, bool is_dc, bool &done, int &jump) {
+  int zzk = 0;
   Node *current = &tree[0];
   while (true) {
     int bits;
@@ -212,7 +203,11 @@ uint8_t HuffmanDecoder::read_tree_batched(vector<HuffmanDecoder::Node> &tree, in
       } else {
         zzk = bits;
       }
-      return value;
+      zzk = extend(zzk, ssss);
+      jump = (value >> 4) & 0xF;
+
+      done = ssss == 0 && jump != 15;
+      return zzk;
     }
   }
 }
